@@ -1,0 +1,33 @@
+# FILE: roles/setup-nfs-server/tasks/create_node_directories.yml
+---
+# Create per-node NFS directories for state and k3s data
+
+- name: Create per-node NFS base directories
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}/nodes/{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+  loop: "{{ nfs_node_hostnames }}"
+
+- name: Create per-node state directories
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}/nodes/{{ item }}/state"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+  loop: "{{ nfs_node_hostnames }}"
+
+- name: Create per-node k3s directories
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}/nodes/{{ item }}/k3s"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+  loop: "{{ nfs_node_hostnames }}"

@@ -1,0 +1,40 @@
+# FILE: roles/setup-nfs-server/tasks/configure_exports.yml
+---
+# Configure /etc/exports for NFS shares
+
+- name: Ensure NFS export base directory exists
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+
+- name: Ensure NFS export base/rootfs directory exists
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}/base"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+
+- name: Ensure NFS export nodes directory exists
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}/nodes"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+
+- name: Configure /etc/exports for NFS shares
+  ansible.builtin.template:
+    src: exports.j2
+    dest: /etc/exports
+    mode: "0644"
+    owner: root
+    group: root
+  become: true
+  notify: Reload NFS exports

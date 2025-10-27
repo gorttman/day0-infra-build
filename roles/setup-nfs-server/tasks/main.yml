@@ -1,0 +1,17 @@
+# FILE: roles/setup-nfs-server/tasks/main.yml
+---
+# Main task file for setup-nfs-server role
+# This role configures the NFS server to export the root filesystem
+# and per-node state/k3s directories for diskless Raspberry Pi boot
+
+- name: Install NFS server packages
+  import_tasks: install_nfs_server.yml
+
+- name: Configure NFS exports
+  import_tasks: configure_exports.yml
+
+- name: Create per-node directories
+  import_tasks: create_node_directories.yml
+
+- name: Manage NFS service
+  import_tasks: manage_nfs_service.yml

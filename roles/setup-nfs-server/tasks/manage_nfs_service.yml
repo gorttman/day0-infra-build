@@ -1,0 +1,17 @@
+# FILE: roles/setup-nfs-server/tasks/manage_nfs_service.yml
+---
+# Start and enable NFS server service
+
+- name: Enable and start NFS kernel server
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    enabled: true
+    state: started
+  become: true
+
+- name: Enable and start rpcbind service
+  ansible.builtin.systemd:
+    name: rpcbind
+    enabled: true
+    state: started
+  become: true

@@ -1,0 +1,19 @@
+# FILE: roles/setup-nfs-server/defaults/main.yml
+---
+# Default variables for setup-nfs-server role
+
+# NFS export options for base rootfs (read-only shared root)
+nfs_base_export_options: "rw,sync,no_subtree_check,no_root_squash"
+
+# NFS export options for per-node directories (read-write per-node state)
+nfs_node_export_options: "rw,sync,no_subtree_check,no_root_squash"
+
+# Network to allow NFS access from (CIDR notation)
+nfs_allowed_network: "192.168.1.0/24"
+
+# List of node hostnames to create directories for
+# Override this in your playbook vars to create directories for your actual nodes
+nfs_node_hostnames:
+  - pinode01
+  - pinode02
+  - pinode03
