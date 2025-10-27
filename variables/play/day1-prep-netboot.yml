@@ -1,6 +1,6 @@
-# FILE: variables/play/day0-prep-netboot.yml
+# FILE: variables/play/day1-prep-netboot.yml
 ---
-# Variables for Day-0 Pi-5 NFS rootfs and kernel build.
+# Variables for Day-1 Pi-5 NFS rootfs and kernel build.
 
 # === Directories ===
 staging_dir: /srv/build
@@ -25,3 +25,20 @@ NETBOOT_HTTP_IP: 192.168.1.10
 NETBOOT_HTTP_PORT: 80
 NFS_SERVER_IP: 192.168.1.10
 default_hostname: pinode
+
+# === NFS Server Configuration ===
+# NFS export options for base rootfs (read-only shared root)
+nfs_base_export_options: "rw,sync,no_subtree_check,no_root_squash"
+
+# NFS export options for per-node directories (read-write per-node state)
+nfs_node_export_options: "rw,sync,no_subtree_check,no_root_squash"
+
+# Network to allow NFS access from (CIDR notation)
+nfs_allowed_network: "192.168.1.0/24"
+
+# List of node hostnames to create directories for
+# Override this in your playbook vars to create directories for your actual nodes
+nfs_node_hostnames:
+  - pinode01
+  - pinode02
+  - pinode03
