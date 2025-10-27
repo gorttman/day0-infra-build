@@ -19,11 +19,11 @@
       import_role:
         name: install-required-software
 
+  tasks:
     - name: Setup and configure NFS server
       import_role:
         name: setup-nfs-server
 
-  tasks:
     - name: Create Raspberry Pi OS (Debian) root filesystem
       import_role:
         name: prep-rootfs

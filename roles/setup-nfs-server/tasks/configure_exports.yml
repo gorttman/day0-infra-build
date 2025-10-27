@@ -37,4 +37,8 @@
     owner: root
     group: root
   become: true
-  notify: Reload NFS exports
+
+- name: Reload NFS exports
+  ansible.builtin.command:
+    cmd: exportfs -ra
+  become: true
