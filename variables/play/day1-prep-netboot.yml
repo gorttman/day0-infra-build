@@ -42,3 +42,13 @@ nfs_node_hostnames:
   - pinode01
   - pinode02
   - pinode03
+
+# === Boot Command Line Configuration ===
+# Path to boot command line configuration file
+boot_cmd_path: /boot/firmware/cmdline.txt
+
+# List of required boot command line switches
+# Add any kernel parameters that must be present in cmdline.txt
+boot_cmd_switches:
+  - cgroup_memory=1
+  - cgroup_enable=memory

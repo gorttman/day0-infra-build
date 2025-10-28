@@ -1,0 +1,7 @@
+---
+- name: Reboot required
+  reboot:
+    msg: "Reboot required to apply boot command line parameters"
+    connect_timeout: 30
+    reboot_timeout: 300
+  become: true

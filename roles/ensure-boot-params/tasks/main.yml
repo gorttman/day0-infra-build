@@ -1,0 +1,8 @@
+# FILE: roles/ensure-boot-params/tasks/main.yml
+---
+# Main task file for ensure-boot-params role
+# This role ensures required boot command line parameters are present
+
+- name: Check and update boot command line parameters
+  ansible.builtin.include_tasks:
+    file: check_boot_cmdline.yml
