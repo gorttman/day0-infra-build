@@ -1,19 +1,19 @@
 ---
 - name: Read current boot command line
-  slurp:
-    src: "{{ boot_cmd_path }}"
+  command: cat "{{ boot_cmd_path }}"
   register: boot_cmd
+  changed_when: false
   become: true
 
 - name: Add missing boot command line parameters
   copy:
     dest: "{{ boot_cmd_path }}"
-    content: "{{ (boot_cmd['content'] | b64decode | regex_replace('\n','') ~ ' ' ~ (boot_cmd_switches | reject('in', boot_cmd['content'] | b64decode) | list) | join(' ')) | regex_replace(' +',' ') }}"
+    content: "{{ (boot_cmd.stdout | regex_replace('\n','') ~ ' ' ~ (boot_cmd_switches | reject('in', boot_cmd.stdout) | list) | join(' ')) | regex_replace(' +',' ') }}"
     backup: true
-  when: (boot_cmd_switches | reject('in', boot_cmd['content'] | b64decode) | list) | length > 0
+  when: (boot_cmd_switches | reject('in', boot_cmd.stdout) | list) | length > 0
   notify: Reboot required
   become: true
 
 - name: Display boot command line status
   debug:
-    msg: "{{ 'Boot command line updated. Missing switches added: ' ~ (boot_cmd_switches | reject('in', boot_cmd['content'] | b64decode) | list) | join(', ') if (boot_cmd_switches | reject('in', boot_cmd['content'] | b64decode) | list) | length > 0 else 'Boot command line is already correct. No changes needed.' }}"
+    msg: "{{ 'Boot command line updated. Missing switches added: ' ~ (boot_cmd_switches | reject('in', boot_cmd.stdout) | list) | join(', ') if (boot_cmd_switches | reject('in', boot_cmd.stdout) | list) | length > 0 else 'Boot command line is already correct. No changes needed.' }}"
