@@ -28,14 +28,10 @@
     msg: "No kernel images found under /boot."
   when: kernel_candidates.matched | int == 0
 
-- name: Select latest kernel image
-  ansible.builtin.set_fact:
-    latest_kernel_path: "{{ (kernel_candidates.files | sort(attribute='mtime') | last).path }}"
-
 - name: Copy latest kernel image to staging directory
   become: true
   ansible.builtin.copy:
-    src: "{{ latest_kernel_path }}"
+    src: "{{ (kernel_candidates.files | sort(attribute='mtime') | last).path }}"
     dest: "{{ staging_boot }}/{{ kernel_filename }}"
     remote_src: true
     mode: "0644"
@@ -56,14 +52,10 @@
     msg: "No initrd images found under /boot."
   when: initrd_candidates.matched | int == 0
 
-- name: Select latest initrd image
-  ansible.builtin.set_fact:
-    latest_initrd_path: "{{ (initrd_candidates.files | sort(attribute='mtime') | last).path }}"
-
 - name: Copy latest initrd image to staging directory
   become: true
   ansible.builtin.copy:
-    src: "{{ latest_initrd_path }}"
+    src: "{{ (initrd_candidates.files | sort(attribute='mtime') | last).path }}"
     dest: "{{ staging_boot }}/{{ initrd_filename }}"
     remote_src: true
     mode: "0644"
