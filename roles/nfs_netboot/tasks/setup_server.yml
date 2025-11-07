@@ -1,0 +1,10 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_server.yml
+################################################################################
+---
+# Day0: Server setup only - no node configuration
+- name: Include NFS server setup tasks
+  ansible.builtin.include_tasks: setup_nfs_server.yml
+
+- name: Include NFS root preparation tasks
+  ansible.builtin.include_tasks: prepare_nfs_root.yml

@@ -3,6 +3,7 @@
     curl -sfL https://get.k3s.io | sh -
   args:
     creates: /usr/local/bin/k3s
+  become: true
 
 - name: Download kubeseal binary (ARM64 for Raspberry Pi 5)
   get_url:

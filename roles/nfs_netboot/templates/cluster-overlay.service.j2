@@ -1,0 +1,16 @@
+################################################################################
+# FILE: roles/nfs_netboot/templates/cluster-overlay.service.j2
+################################################################################
+[Unit]
+Description=Setup per-node overlay filesystems
+After=network-online.target nfs-client.target remote-fs-pre.target
+Wants=network-online.target
+Before=remote-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/setup-overlays.sh
+
+[Install]
+WantedBy=remote-fs.target

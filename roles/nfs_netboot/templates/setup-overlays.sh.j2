@@ -1,0 +1,31 @@
+################################################################################
+# FILE: roles/nfs_netboot/templates/setup-overlays.sh.j2
+################################################################################
+#!/bin/bash
+set -e
+
+# Get node name from MAC address (last 6 chars without colons)
+NODE_MAC=$(cat /sys/class/net/eth0/address | tr -d ':')
+NODE_NAME="pinode-${NODE_MAC: -6}"
+
+# NFS server and paths
+NFS_SERVER="{{ nfs_server_ip }}"
+CLUSTER_PATH="/cluster/${NODE_NAME}"
+
+# Mount cluster storage
+mkdir -p /mnt/cluster
+mount -t nfs -o {{ nfs_mount_opts }} ${NFS_SERVER}:${CLUSTER_PATH} /mnt/cluster
+
+# Ensure directories exist
+for dir in etc var root home tmp; do
+    mkdir -p /mnt/cluster/${dir}
+done
+
+# Bind mount each directory over the shared base
+mount --bind /mnt/cluster/etc /etc
+mount --bind /mnt/cluster/var /var
+mount --bind /mnt/cluster/root /root
+mount --bind /mnt/cluster/home /home
+mount --bind /mnt/cluster/tmp /tmp
+
+echo "Per-node directories mounted for ${NODE_NAME}"

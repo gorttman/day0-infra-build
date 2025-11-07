@@ -29,7 +29,6 @@
       ansible.builtin.include_role:
         name: apply-bootstrap
 
-
     - name: Install sealed secrets backup
       ansible.builtin.include_role:
         name: install_helper_scripts
@@ -62,3 +61,59 @@
         name: apply-bootstrap
         tasks_from: manage_repo_secrets.yml
 
+
+- name: Day0 NFS prep
+  hosts: all
+  become: true
+  tags:
+    - manage_nfs
+  
+  vars_files:
+    - variables/common/set_environment.yml
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '-') }}.yml"
+  
+  pre_tasks:
+    - name: Ensure roles from requirements.yml are installed
+      ansible.builtin.command:
+        cmd: ansible-galaxy install -r roles/requirements.yml -p roles/
+      changed_when: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run shared workspace role
+      ansible.builtin.include_role:
+        name: shared_workspace
+  
+  tasks:
+    - name: Setup NFS server infrastructure
+      ansible.builtin.include_role:
+        name: nfs_netboot
+#        tasks_from: setup_server
+
+- name: Day1 node prep
+  hosts: all
+  become: true
+  tags:
+    - manage_nodes
+  
+  vars_files:
+    - variables/common/set_environment.yml
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '-') }}.yml"
+  
+  pre_tasks:
+    - name: Ensure roles from requirements.yml are installed
+      ansible.builtin.command:
+        cmd: ansible-galaxy install -r roles/requirements.yml -p roles/
+      changed_when: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run shared workspace role
+      ansible.builtin.include_role:
+        name: shared_workspace
+  
+  tasks:
+    - name: Add netboot node configuration
+      ansible.builtin.include_role:
+        name: nfs_netboot
+        tasks_from: add_node

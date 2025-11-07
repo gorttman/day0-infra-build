@@ -1,0 +1,7 @@
+################################################################################
+# FILE: roles/nfs_netboot/templates/exports.j2
+################################################################################
+# NFS exports for netboot
+{{ nfs_root_base }} {{ nfs_network }}({{ nfs_export_opts }},fsid=0,crossmnt)
+{{ nfs_os_path }} {{ nfs_network }}({{ nfs_export_opts }},nohide)
+{{ nfs_cluster_path }} {{ nfs_network }}({{ nfs_export_opts }},nohide)

@@ -1,0 +1,77 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/configure_node_storage.yml
+################################################################################
+---
+# Atomic task: Configure per-node cluster storage with initial content
+- name: Create per-node cluster storage base directories
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+
+- name: Create cluster storage subdirectories for each node
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.0.mac_suffix }}/{{ item.1 }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes | product(['etc', 'var', 'home', 'tmp']) | list }}"
+  loop_control:
+    label: "pinode-{{ item.0.mac_suffix }}/{{ item.1 }}"
+
+- name: Create root directory with restricted permissions
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/root"
+    state: directory
+    mode: '0700'
+  loop: "{{ nodes }}"
+
+- name: Check if cluster storage is already populated
+  ansible.builtin.stat:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/hostname"
+  register: cluster_populated
+  loop: "{{ nodes }}"
+
+- name: Copy initial etc content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/etc/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/etc/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/etc"
+
+- name: Copy initial var content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/var/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/var/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/var"
+
+- name: Copy initial home content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/home/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/home/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/home"
+
+- name: Copy initial root content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/root/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/root/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/root"

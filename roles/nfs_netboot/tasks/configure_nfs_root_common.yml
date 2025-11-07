@@ -1,0 +1,19 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/configure_nfs_root_common.yml
+################################################################################
+---
+# Common configuration for NFS root
+- name: Create bind mount script
+  ansible.builtin.template:
+    src: setup-overlays.sh.j2
+    dest: "{{ nfs_os_path }}/usr/local/bin/setup-overlays.sh"
+    mode: '0755'
+
+- name: Create systemd service for bind mounts
+  ansible.builtin.template:
+    src: cluster-overlay.service.j2
+    dest: "{{ nfs_os_path }}/etc/systemd/system/cluster-overlay.service"
+    mode: '0644'
+
+- name: Include enable service in chroot tasks
+  ansible.builtin.include_tasks: enable_service_in_chroot.yml

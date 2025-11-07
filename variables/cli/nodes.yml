@@ -1,0 +1,3 @@
+nodes:
+  - name: 'pinode-01'
+    mac_suffix: whatever

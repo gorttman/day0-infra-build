@@ -1,0 +1,54 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_tftp_structure.yml
+################################################################################
+---
+# Atomic task: Setup complete TFTP/PXE boot structure
+- name: Create TFTP base directory
+  ansible.builtin.file:
+    path: "{{ tftp_root }}"
+    state: directory
+    mode: '0755'
+
+- name: Create per-node TFTP directories
+  ansible.builtin.file:
+    path: "{{ tftp_root }}/{{ item.name }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+- name: Copy boot files to TFTP directories
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/boot/firmware/{{ item.1 }}"
+    dest: "{{ tftp_root }}/{{ item.0.name }}/{{ item.1 }}"
+    mode: '0644'
+    remote_src: true
+  loop: "{{ nodes | product(['start4.elf', 'bootcode.bin', 'kernel_2712.img', 'kernel8.img', 'bcm2712-rpi-5-b.dtb', 'initramfs_2712', 'initramfs8']) }}"
+  when: nodes | length > 0
+  loop_control:
+    label: "{{ item.0.name }}/{{ item.1 }}"
+
+- name: Copy firmware directory to TFTP
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/boot/firmware/"
+    dest: "{{ tftp_root }}/{{ item.name }}/firmware/"
+    mode: preserve
+    remote_src: true
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+- name: Create config.txt for each node
+  ansible.builtin.template:
+    src: config.txt.j2
+    dest: "{{ tftp_root }}/{{ item.name }}/config.txt"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+- name: Create cmdline.txt for each node
+  ansible.builtin.template:
+    src: cmdline.txt.j2
+    dest: "{{ tftp_root }}/{{ item.name }}/cmdline.txt"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  when: nodes | length > 0

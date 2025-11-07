@@ -1,0 +1,17 @@
+---
+# Legacy full setup - can be used if needed for complete single-run setup
+- name: Include NFS server setup tasks
+  ansible.builtin.include_tasks: setup_nfs_server.yml
+
+- name: Import golden image from sd card
+  ansible.builtin.include_tasks: import_from_sd_card.yml
+
+- name: Include common NFS root configuration
+  ansible.builtin.include_tasks: configure_nfs_root_common.yml
+
+- name: Include TFTP structure setup tasks
+  ansible.builtin.include_tasks: setup_tftp_structure.yml
+
+- name: Include node storage configuration tasks
+  ansible.builtin.include_tasks: configure_node_storage.yml
+  when: nodes | length > 0

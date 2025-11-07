@@ -1,0 +1,83 @@
+---
+# Import golden image from SD card
+- name: Check for SD card block device
+  ansible.builtin.stat:
+    path: "{{ sd_card_device }}"
+  register: sd_card_check
+  failed_when: not sd_card_check.stat.exists
+
+- name: Identify SD card root partition
+  ansible.builtin.shell:
+    cmd: lsblk -nlo NAME,LABEL,MOUNTPOINT {{ sd_card_device }} | grep -E '(rootfs|root)' | awk '{print "/dev/"$1}' | head -1
+  register: sd_root_partition
+  changed_when: false
+  failed_when: sd_root_partition.stdout == ""
+
+- name: Create temporary mount point for SD card
+  ansible.builtin.file:
+    path: "{{ sd_card_mount_point }}/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - root
+    - boot
+
+- name: Mount SD card root partition
+  ansible.posix.mount:
+    path: "{{ sd_card_mount_point }}/root"
+    src: "{{ sd_root_partition.stdout }}"
+    fstype: ext4
+    opts: ro
+    state: mounted
+
+- name: Check if NFS root is already populated
+  ansible.builtin.stat:
+    path: "{{ nfs_os_path }}/bin"
+  register: nfs_root_check
+
+- name: Copy golden image from SD card to NFS root
+  ansible.posix.synchronize:
+    src: "{{ sd_card_mount_point }}/root/"
+    dest: "{{ nfs_os_path }}/"
+    rsync_opts:
+      - "--exclude=/dev/*"
+      - "--exclude=/proc/*"
+      - "--exclude=/sys/*"
+      - "--exclude=/tmp/*"
+      - "--exclude=/run/*"
+      - "--exclude=/mnt/*"
+      - "--exclude=/media/*"
+      - "--exclude=/lost+found"
+    archive: true
+  when: not nfs_root_check.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+
+- name: Unmount SD card
+  ansible.posix.mount:
+    path: "{{ sd_card_mount_point }}"
+    state: unmounted
+  become: true
+
+- name: Identify SD card root partition
+  ansible.builtin.shell:
+    cmd: lsblk -nlo NAME,LABEL,MOUNTPOINT {{ sd_card_device }} | grep -E bootfs | awk ' {print "/dev/"$1}'
+  register: sd_boot_partition
+  changed_when: false
+  failed_when: sd_boot_partition.stdout == ""
+
+- name: debugging 
+  debug: 
+    msg: "{{ sd_boot_partition }}"
+
+- name: Mount SD card boot partition
+  ansible.posix.mount:
+    path: "{{ sd_card_mount_point }}/boot/"
+    src: "{{ sd_boot_partition.stdout }}"
+    fstype: ext4
+    opts: ro
+    state: mounted
+
+- name: Copy boot firmware
+  ansible.posix.synchronize:
+    src: "{{ sd_card_mount_point }}/boot/"
+    dest: "{{ nfs_os_path }}/boot/firmware/"

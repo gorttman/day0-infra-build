@@ -4,10 +4,11 @@
       - curl
       - git
       - nfs-common
+      - nfs-kernel-server
       - python3-pip
       - python3-kubernetes
       - iptables
-      - docker
+      - docker.io 
     state: present
     update_cache: true
   become: true

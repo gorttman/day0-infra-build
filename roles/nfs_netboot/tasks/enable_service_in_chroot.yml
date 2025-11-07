@@ -1,0 +1,29 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/enable_service_in_chroot.yml
+################################################################################
+---
+- name: Mount required filesystems for chroot
+  ansible.posix.mount:
+    path: "{{ nfs_os_path }}{{ item }}"
+    src: "{{ item }}"
+    fstype: none
+    opts: bind
+    state: mounted
+  loop:
+    - /dev
+    - /proc
+    - /sys
+
+- name: Enable service in chroot environment
+  ansible.builtin.command:
+    cmd: "chroot {{ nfs_os_path }} systemctl enable cluster-overlay.service"
+
+- name: Unmount chroot filesystems
+  ansible.posix.mount:
+    path: "{{ nfs_os_path }}{{ item }}"
+    state: unmounted
+  loop:
+    - /sys
+    - /proc
+    - /dev
+  failed_when: false

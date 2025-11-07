@@ -93,3 +93,14 @@
     kubectl -n kubernetes-dashboard create token admin-user
   register: dashboard_token
   changed_when: false
+
+
+- name: Relax permissions on kubeconfig so Ansible can read it
+  file:
+    path: /etc/rancher/k3s/k3s.yaml
+    owner: root
+    group: root
+    mode: '0744'
+  become: true
+  become_user: root
+

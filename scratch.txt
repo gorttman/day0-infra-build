@@ -1,0 +1,552 @@
+
+# FILE: day0-nfs-prep.yml
+################################################################################
+---
+- name: Day0 NFS prep
+  hosts: all
+  become: true
+  tags:
+    - manage_nfs
+  
+  vars_files:
+    - variables/common/set_environment.yml
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '-') }}.yml"
+  
+  pre_tasks:
+    - name: Ensure roles from requirements.yml are installed
+      ansible.builtin.command:
+        cmd: ansible-galaxy install -r roles/requirements.yml -p roles/
+      changed_when: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run shared workspace role
+      ansible.builtin.include_role:
+        name: shared_workspace
+  
+  tasks:
+    - name: Setup NFS server infrastructure
+      ansible.builtin.include_role:
+        name: nfs_netboot
+        tasks_from: setup_server
+
+################################################################################
+# FILE: day1-node-prep.yml
+################################################################################
+---
+- name: Day1 node prep
+  hosts: all
+  become: true
+  tags:
+    - manage_nodes
+  
+  vars_files:
+    - variables/common/set_environment.yml
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '-') }}.yml"
+  
+  pre_tasks:
+    - name: Ensure roles from requirements.yml are installed
+      ansible.builtin.command:
+        cmd: ansible-galaxy install -r roles/requirements.yml -p roles/
+      changed_when: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run shared workspace role
+      ansible.builtin.include_role:
+        name: shared_workspace
+  
+  tasks:
+    - name: Add netboot node configuration
+      ansible.builtin.include_role:
+        name: nfs_netboot
+        tasks_from: add_node
+
+################################################################################
+# FILE: variables/play/day0-nfs-prep.yml
+################################################################################
+---
+# NFS server configuration
+nfs_server_ip: "192.168.1.10"
+nfs_network: "192.168.1.0/27"
+nfs_export_opts: "rw,sync,no_subtree_check,no_root_squash"
+
+# Directory structure
+nfs_root_base: "/srv/nfs"
+nfs_os_path: "{{ nfs_root_base }}/rpios/latest"
+nfs_cluster_path: "{{ nfs_root_base }}/cluster"
+tftp_root: "/var/www/html/netboot/rpi5"
+
+# SD card golden image source
+sd_card_device: "/dev/mmcblk0"
+sd_card_mount_point: "/mnt/golden-sd"
+
+# NFS mount options
+nfs_version: "4.2"
+nfs_mount_opts: "vers={{ nfs_version }},hard,timeo=600,retrans=10,noacl,nocto"
+
+# Boot configuration
+kernel_params: "console=serial0,115200 console=tty1 root=/dev/nfs nfsroot={{ nfs_server_ip }}:/rpios/latest,{{ nfs_mount_opts }},rw ip=dhcp rootwait elevator=deadline rootfstype=nfs fsck.repair=yes plymouth.ignore-serial-consoles cgroup_memory=1 cgroup_enable=memory consoleblank=0"
+
+################################################################################
+# FILE: variables/play/day1-node-prep.yml
+################################################################################
+---
+# Nodes to configure
+nodes:
+  - name: pinode-01
+    mac: "2c:cf:67:27:93:f1"
+    mac_suffix: "2793f1"
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/main.yml
+################################################################################
+---
+# Legacy full setup - can be used if needed for complete single-run setup
+- name: Include NFS server setup tasks
+  ansible.builtin.include_tasks: setup_nfs_server.yml
+  tags: [nfs, nfs_server]
+
+- name: Include NFS root preparation tasks
+  ansible.builtin.include_tasks: prepare_nfs_root.yml
+  tags: [nfs, nfs_root]
+
+- name: Include TFTP structure setup tasks
+  ansible.builtin.include_tasks: setup_tftp_structure.yml
+  tags: [tftp, boot]
+
+- name: Include node storage configuration tasks
+  ansible.builtin.include_tasks: configure_node_storage.yml
+  when: nodes | length > 0
+  tags: [nodes, storage]
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_server.yml
+################################################################################
+---
+# Day0: Server setup only - no node configuration
+- name: Include NFS server setup tasks
+  ansible.builtin.include_tasks: setup_nfs_server.yml
+
+- name: Include NFS root preparation tasks
+  ansible.builtin.include_tasks: prepare_nfs_root.yml
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/add_node.yml
+################################################################################
+---
+# Day1: Add a new node to existing infrastructure
+- name: Ensure nodes variable is defined
+  ansible.builtin.assert:
+    that:
+      - nodes is defined
+      - nodes | length > 0
+    fail_msg: "nodes variable must be defined with at least one node"
+
+- name: Include TFTP structure setup for new nodes
+  ansible.builtin.include_tasks: setup_tftp_structure.yml
+  tags: [tftp, boot]
+
+- name: Include node storage configuration for new nodes
+  ansible.builtin.include_tasks: configure_node_storage.yml
+  tags: [nodes, storage]
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_nfs_server.yml
+################################################################################
+---
+# Atomic task: Install and configure NFS server to serving state
+- name: Install NFS server packages
+  ansible.builtin.apt:
+    name:
+      - nfs-kernel-server
+      - nfs-common
+    state: present
+    update_cache: true
+
+- name: Create NFS directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ nfs_root_base }}"
+    - "{{ nfs_os_path }}"
+    - "{{ nfs_cluster_path }}"
+
+- name: Configure NFS exports
+  ansible.builtin.template:
+    src: exports.j2
+    dest: /etc/exports
+    mode: '0644'
+  notify:
+    - Reload NFS exports
+    - Restart NFS server
+
+- name: Ensure NFS server is enabled and started
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    enabled: true
+    state: started
+
+- name: Flush handlers to ensure NFS is ready
+  ansible.builtin.meta: flush_handlers
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/prepare_nfs_root.yml
+################################################################################
+---
+# Atomic task: Prepare complete bootable NFS root filesystem
+- name: Include SD card golden image import
+  ansible.builtin.include_tasks: import_from_sd_card.yml
+
+- name: Include common NFS root configuration
+  ansible.builtin.include_tasks: configure_nfs_root_common.yml
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/import_from_sd_card.yml
+################################################################################
+---
+# Import golden image from SD card
+- name: Check for SD card block device
+  ansible.builtin.stat:
+    path: "{{ sd_card_device }}"
+  register: sd_card_check
+  failed_when: not sd_card_check.stat.exists
+
+- name: Identify SD card root partition
+  ansible.builtin.shell:
+    cmd: lsblk -nlo NAME,LABEL,MOUNTPOINT {{ sd_card_device }} | grep -E '(rootfs|root)' | awk '{print "/dev/"$1}' | head -1
+  register: sd_root_partition
+  changed_when: false
+  failed_when: sd_root_partition.stdout == ""
+
+- name: Create temporary mount point for SD card
+  ansible.builtin.file:
+    path: "{{ sd_card_mount_point }}"
+    state: directory
+    mode: '0755'
+
+- name: Mount SD card root partition
+  ansible.posix.mount:
+    path: "{{ sd_card_mount_point }}"
+    src: "{{ sd_root_partition.stdout }}"
+    fstype: ext4
+    opts: ro
+    state: mounted
+
+- name: Check if NFS root is already populated
+  ansible.builtin.stat:
+    path: "{{ nfs_os_path }}/bin"
+  register: nfs_root_check
+
+- name: Copy golden image from SD card to NFS root
+  ansible.posix.synchronize:
+    src: "{{ sd_card_mount_point }}/"
+    dest: "{{ nfs_os_path }}/"
+    rsync_opts:
+      - "--exclude=/dev/*"
+      - "--exclude=/proc/*"
+      - "--exclude=/sys/*"
+      - "--exclude=/tmp/*"
+      - "--exclude=/run/*"
+      - "--exclude=/mnt/*"
+      - "--exclude=/media/*"
+      - "--exclude=/lost+found"
+    archive: true
+  when: not nfs_root_check.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+
+- name: Unmount SD card
+  ansible.posix.mount:
+    path: "{{ sd_card_mount_point }}"
+    state: unmounted
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/configure_nfs_root_common.yml
+################################################################################
+---
+# Common configuration for NFS root
+- name: Create bind mount script
+  ansible.builtin.template:
+    src: setup-overlays.sh.j2
+    dest: "{{ nfs_os_path }}/usr/local/bin/setup-overlays.sh"
+    mode: '0755'
+
+- name: Create systemd service for bind mounts
+  ansible.builtin.template:
+    src: cluster-overlay.service.j2
+    dest: "{{ nfs_os_path }}/etc/systemd/system/cluster-overlay.service"
+    mode: '0644'
+
+- name: Include enable service in chroot tasks
+  ansible.builtin.include_tasks: enable_service_in_chroot.yml
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/enable_service_in_chroot.yml
+################################################################################
+---
+- name: Mount required filesystems for chroot
+  ansible.posix.mount:
+    path: "{{ nfs_os_path }}{{ item }}"
+    src: "{{ item }}"
+    fstype: none
+    opts: bind
+    state: mounted
+  loop:
+    - /dev
+    - /proc
+    - /sys
+
+- name: Enable service in chroot environment
+  community.general.chroot:
+    chroot: "{{ nfs_os_path }}"
+    command: systemctl enable cluster-overlay.service
+
+- name: Unmount chroot filesystems
+  ansible.posix.mount:
+    path: "{{ nfs_os_path }}{{ item }}"
+    state: unmounted
+  loop:
+    - /sys
+    - /proc
+    - /dev
+  failed_when: false
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_tftp_structure.yml
+################################################################################
+---
+# Atomic task: Setup complete TFTP/PXE boot structure
+- name: Create TFTP base directory
+  ansible.builtin.file:
+    path: "{{ tftp_root }}"
+    state: directory
+    mode: '0755'
+
+- name: Create per-node TFTP directories
+  ansible.builtin.file:
+    path: "{{ tftp_root }}/{{ item.name }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+- name: Copy boot files to TFTP directories
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/boot/firmware/{{ item.1 }}"
+    dest: "{{ tftp_root }}/{{ item.0.name }}/{{ item.1 }}"
+    mode: '0644'
+    remote_src: true
+  loop: "{{ nodes | product(['start4.elf', 'bootcode.bin', 'kernel_2712.img', 'kernel8.img', 'bcm2712-rpi-5-b.dtb', 'initramfs_2712', 'initramfs8']) }}"
+  when: nodes | length > 0
+  loop_control:
+    label: "{{ item.0.name }}/{{ item.1 }}"
+
+- name: Copy firmware directory to TFTP
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/boot/firmware/"
+    dest: "{{ tftp_root }}/{{ item.name }}/firmware/"
+    mode: preserve
+    remote_src: true
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+- name: Create config.txt for each node
+  ansible.builtin.template:
+    src: config.txt.j2
+    dest: "{{ tftp_root }}/{{ item.name }}/config.txt"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+- name: Create cmdline.txt for each node
+  ansible.builtin.template:
+    src: cmdline.txt.j2
+    dest: "{{ tftp_root }}/{{ item.name }}/cmdline.txt"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  when: nodes | length > 0
+
+################################################################################
+# FILE: roles/nfs_netboot/tasks/configure_node_storage.yml
+################################################################################
+---
+# Atomic task: Configure per-node cluster storage with initial content
+- name: Create per-node cluster storage base directories
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+
+- name: Create cluster storage subdirectories for each node
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.0.mac_suffix }}/{{ item.1 }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes | product(['etc', 'var', 'home', 'tmp']) | list }}"
+  loop_control:
+    label: "pinode-{{ item.0.mac_suffix }}/{{ item.1 }}"
+
+- name: Create root directory with restricted permissions
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/root"
+    state: directory
+    mode: '0700'
+  loop: "{{ nodes }}"
+
+- name: Check if cluster storage is already populated
+  ansible.builtin.stat:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/hostname"
+  register: cluster_populated
+  loop: "{{ nodes }}"
+
+- name: Copy initial etc content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/etc/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/etc/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/etc"
+
+- name: Copy initial var content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/var/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/var/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/var"
+
+- name: Copy initial home content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/home/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/home/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/home"
+
+- name: Copy initial root content to node cluster storage
+  ansible.posix.synchronize:
+    src: "{{ nfs_os_path }}/root/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/root/"
+    archive: true
+  loop: "{{ cluster_populated.results }}"
+  when: not item.stat.exists
+  delegate_to: "{{ inventory_hostname }}"
+  loop_control:
+    label: "pinode-{{ item.item.mac_suffix }}/root"
+
+################################################################################
+# FILE: roles/nfs_netboot/templates/exports.j2
+################################################################################
+# NFS exports for netboot
+{{ nfs_root_base }} {{ nfs_network }}({{ nfs_export_opts }},fsid=0,crossmnt)
+{{ nfs_os_path }} {{ nfs_network }}({{ nfs_export_opts }},nohide)
+{{ nfs_cluster_path }} {{ nfs_network }}({{ nfs_export_opts }},nohide)
+
+################################################################################
+# FILE: roles/nfs_netboot/templates/setup-overlays.sh.j2
+################################################################################
+#!/bin/bash
+set -e
+
+# Get node name from MAC address (last 6 chars without colons)
+NODE_MAC=$(cat /sys/class/net/eth0/address | tr -d ':')
+NODE_NAME="pinode-${NODE_MAC: -6}"
+
+# NFS server and paths
+NFS_SERVER="{{ nfs_server_ip }}"
+CLUSTER_PATH="/cluster/${NODE_NAME}"
+
+# Mount cluster storage
+mkdir -p /mnt/cluster
+mount -t nfs -o {{ nfs_mount_opts }} ${NFS_SERVER}:${CLUSTER_PATH} /mnt/cluster
+
+# Ensure directories exist
+for dir in etc var root home tmp; do
+    mkdir -p /mnt/cluster/${dir}
+done
+
+# Bind mount each directory over the shared base
+mount --bind /mnt/cluster/etc /etc
+mount --bind /mnt/cluster/var /var
+mount --bind /mnt/cluster/root /root
+mount --bind /mnt/cluster/home /home
+mount --bind /mnt/cluster/tmp /tmp
+
+echo "Per-node directories mounted for ${NODE_NAME}"
+
+################################################################################
+# FILE: roles/nfs_netboot/templates/cluster-overlay.service.j2
+################################################################################
+[Unit]
+Description=Setup per-node overlay filesystems
+After=network-online.target nfs-client.target remote-fs-pre.target
+Wants=network-online.target
+Before=remote-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/setup-overlays.sh
+
+[Install]
+WantedBy=remote-fs.target
+
+################################################################################
+# FILE: roles/nfs_netboot/templates/config.txt.j2
+################################################################################
+arm_64bit=1
+enable_uart=1
+disable_overscan=1
+arm_boost=1
+
+kernel=kernel_2712.img
+initramfs initramfs_2712 followkernel
+device_tree=bcm2712-rpi-5-b.dtb
+
+boot_delay=1
+
+################################################################################
+# FILE: roles/nfs_netboot/templates/cmdline.txt.j2
+################################################################################
+{{ kernel_params }}
+
+################################################################################
+# FILE: roles/nfs_netboot/handlers/main.yml
+################################################################################
+---
+- name: Reload NFS exports
+  ansible.builtin.command: exportfs -ra
+  changed_when: true
+
+- name: Restart NFS server
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    state: restarted
+
+################################################################################
+# FILE: roles/nfs_netboot/README.md
+################################################################################
+# NFS Netboot Role
+
+Configures NFS server infrastructure for Raspberry Pi 5 netboot with per-node storage using golden image from SD card.
+
+## Usage
+
+### Day0: Initial Server Setup
+Insert SD card with clean golden image, then run:
+```bash
+ansible-playbook day0-nfs-prep.yml --limit nfs_server
+
+

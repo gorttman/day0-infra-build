@@ -1,0 +1,31 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_nfs_server.yml
+################################################################################
+---
+- name: Create NFS directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ nfs_root_base }}"
+    - "{{ nfs_os_path }}"
+    - "{{ nfs_cluster_path }}"
+
+- name: Configure NFS exports
+  ansible.builtin.template:
+    src: exports.j2
+    dest: /etc/exports
+    mode: '0644'
+  notify:
+    - Reload NFS exports
+    - Restart NFS server
+
+- name: Ensure NFS server is enabled and started
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    enabled: true
+    state: started
+
+- name: Flush handlers to ensure NFS is ready
+  ansible.builtin.meta: flush_handlers
