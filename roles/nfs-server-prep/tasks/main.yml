@@ -1,0 +1,36 @@
+---
+- name: Ensure NFS export roots exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ NFS_EXPORT_PATH }}"
+    - "{{ NFS_EXPORT_PATH }}/base"
+    - "{{ NFS_EXPORT_PATH }}/nodes"
+
+# define your nodes here or pull from inventory/group_vars
+- name: Ensure per-node state/upper/work dirs exist
+  ansible.builtin.file:
+    path: "{{ NFS_EXPORT_PATH }}/nodes/{{ item }}/state"
+    state: directory
+    mode: "0777"
+  loop: "{{ nfs_nodes | default(['pi-node-01']) }}"
+
+- name: Write exports file for Pi-lab
+  ansible.builtin.copy:
+    dest: /etc/exports.d/pi-lab.exports
+    mode: "0644"
+    content: |
+      {{ NFS_EXPORT_PATH }}/base  ro,no_subtree_check,fsid=10,async,no_root_squash
+      {% for n in nfs_nodes | default(['pi-node-01']) -%}
+      {{ NFS_EXPORT_PATH }}/nodes/{{ n }}  rw,no_subtree_check,async,no_root_squash
+      {{ NFS_EXPORT_PATH }}/nodes/{{ n }}/state  rw,no_subtree_check,async,no_root_squash
+      {% endfor -%}
+  notify: exportfs-reload
+
+# optional: verify the service is installed/running (Debian)
+- name: Ensure nfs-kernel-server is installed
+  ansible.builtin.package:
+    name: nfs-kernel-server
+    state: present

@@ -2,6 +2,17 @@
 ---
 # Ensure all staging directories for rootfs creation exist.
 
+- name: Safety check – staging_rootfs must be defined and safe
+  ansible.builtin.assert:
+    that:
+      - staging_rootfs is defined
+      - staging_rootfs | length > 1
+      - staging_rootfs != '/'
+      - staging_rootfs is match('^/srv/build(/|$)')
+    fail_msg: >
+      REFUSING to run: invalid staging_rootfs ({{ staging_rootfs | default('UNSET') }}).
+      Load variables/play/day1-prep-netboot.yml or set staging_rootfs explicitly.
+
 - name: Ensure base staging directory exists
   ansible.builtin.file:
     path: "{{ staging_dir }}"
