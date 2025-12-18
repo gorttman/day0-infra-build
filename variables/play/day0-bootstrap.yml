@@ -22,6 +22,10 @@ bootstrap_repos:
     repo: https://github.com/gorttman/day1-foundation.git
     rev: main
     path: apps
+  - name: day2-services
+    repo: https://github.com/gorttman/day2-services.git
+    rev: main
+    path: apps
 
 config_repos:
   - name: dhcpd-config
