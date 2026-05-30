@@ -1,2 +1,31 @@
-**/shared_*/**
+# Dev debris
+scratch.*
+tmp.*
+*.out
+*.tmp
+*.bak
+
+# Ansible runtime
+*.retry
+roles/shared_*/
+roles/downloaded/
+
+# Credentials and secrets
 credentials/
+*.vault
+vault_pass*
+.vault_pass
+
+# Python / virtualenv
+.venv/
+__pycache__/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
