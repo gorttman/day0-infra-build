@@ -22,11 +22,11 @@ kubectl get secret sealed-secrets-key -n kube-system -o yaml > "$OUTPUT_FILE"
 echo "[*] Backed up Sealed Secrets key to $OUTPUT_FILE"
 
 # Update cronjob to weekly
-CRON_JOB="0 3 * * 0 /usr/local/bin/backup-sealed-secrets.sh"
+CRON_JOB="0 3 * * 0 /usr/local/bin/backup_sealed_secrets.sh"
 CRONTAB_TMP=$(mktemp)
 
 # Remove any existing entries for this script
-crontab -l 2>/dev/null | grep -v "backup-sealed-secrets.sh" > "$CRONTAB_TMP" || true
+crontab -l 2>/dev/null | grep -v "backup_sealed_secrets.sh" > "$CRONTAB_TMP" || true
 
 # Add the weekly schedule
 echo "$CRON_JOB" >> "$CRONTAB_TMP"

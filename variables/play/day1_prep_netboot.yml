@@ -1,13 +1,13 @@
-# FILE: variables/play/day0-prep-netboot.yml
+# FILE: variables/play/day1_prep_netboot.yml
 ---
-# Variables for Day-0 Pi-5 NFS rootfs and kernel build.
+# Variables for Day-1 Pi-5 NFS rootfs and kernel build.
 
 # === Directories ===
 staging_dir: /srv/build
 staging_rootfs: "{{ staging_dir }}/rootfs"
 staging_boot: "{{ staging_dir }}/boot"
 boot_publish_path: /var/www/html/netboot/rpi5
-NFS_EXPORT_PATH: /srv/nfs
+nfs_export_path: /srv/nfs
 
 # === Packages ===
 base_os_release: bookworm
@@ -21,8 +21,7 @@ initrd_filename: initrd.img
 ipxe_filename: boot.ipxe
 
 # === Network/NFS parameters ===
-NETBOOT_HTTP_IP: 192.168.1.10
-NETBOOT_HTTP_PORT: 80
-NFS_SERVER_IP: 192.168.1.10
+netboot_http_ip: 192.168.1.10
+netboot_http_port: 80
+nfs_server_ip: 192.168.1.10
 default_hostname: pinode
-NFS_SERVER_IP: 192.168.1.10

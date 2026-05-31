@@ -4,11 +4,11 @@
 
 - name: Ensure NFS base export directory exists
   ansible.builtin.file:
-    path: "{{ NFS_EXPORT_PATH }}/base"
+    path: "{{ nfs_export_path }}/base"
     state: directory
     mode: "0755"
 
 - name: Sync rootfs to NFS export
   ansible.builtin.command:
-    cmd: rsync -a --delete "{{ staging_rootfs }}/" "{{ NFS_EXPORT_PATH }}/base/"
+    cmd: rsync -a --delete "{{ staging_rootfs }}/" "{{ nfs_export_path }}/base/"
   become: true

@@ -10,7 +10,7 @@
       [Unit]
       Description=Per-node state NFS mount
       [Mount]
-      What={{ NFS_SERVER_IP }}:{{ NFS_EXPORT_PATH }}/nodes/%H/state
+      What={{ nfs_server_ip }}:{{ nfs_export_path }}/nodes/%H/state
       Where=/state
       Type=nfs
       Options=_netdev
@@ -25,7 +25,7 @@
       [Unit]
       Description=Per-node k3s data mount
       [Mount]
-      What={{ NFS_SERVER_IP }}:{{ NFS_EXPORT_PATH }}/nodes/%H/k3s
+      What={{ nfs_server_ip }}:{{ nfs_export_path }}/nodes/%H/k3s
       Where=/var/lib/rancher/k3s
       Type=nfs
       Options=_netdev

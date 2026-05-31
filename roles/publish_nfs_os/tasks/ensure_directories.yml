@@ -4,12 +4,12 @@
 
 - name: Ensure NFS base export directory exists
   ansible.builtin.file:
-    path: "{{ NFS_EXPORT_PATH }}"
+    path: "{{ nfs_export_path }}"
     state: directory
     mode: "0755"
 
 - name: Ensure base export path for rootfs exists
   ansible.builtin.file:
-    path: "{{ NFS_EXPORT_PATH }}/base"
+    path: "{{ nfs_export_path }}/base"
     state: directory
     mode: "0755"

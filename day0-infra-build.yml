@@ -4,7 +4,7 @@
     - install_day0
   vars_files:
     - variables/common/set_environment.yml
-    - variables/play/day0-bootstrap.yml
+    - variables/play/day0_bootstrap.yml
 
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed
@@ -19,15 +19,15 @@
   tasks:
     - name: Check prerequisites
       ansible.builtin.include_role:
-        name: prep-prerequisites
+        name: prep_prerequisites
 
     - name: Install all required software
       ansible.builtin.include_role:
-        name: install-required-software
+        name: install_required_software
 
     - name: Apply ArgoCD bootstrap Application
       ansible.builtin.include_role:
-        name: apply-bootstrap
+        name: apply_bootstrap
 
     - name: Install sealed secrets backup
       ansible.builtin.include_role:
@@ -43,7 +43,7 @@
     - manage_day1
   vars_files:
     - variables/common/set_environment.yml
-    - variables/play/day0-bootstrap.yml
+    - variables/play/day0_bootstrap.yml
 
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed
@@ -58,7 +58,7 @@
   tasks:
     - name: Apply ArgoCD bootstrap Application
       ansible.builtin.include_role:
-        name: apply-bootstrap
+        name: apply_bootstrap
         tasks_from: manage_repo_secrets.yml
 
 
@@ -70,7 +70,7 @@
   
   vars_files:
     - variables/common/set_environment.yml
-    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '-') }}.yml"
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '_') }}.yml"
   
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed
@@ -98,7 +98,7 @@
   
   vars_files:
     - variables/common/set_environment.yml
-    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '-') }}.yml"
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '_') }}.yml"
   
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed
