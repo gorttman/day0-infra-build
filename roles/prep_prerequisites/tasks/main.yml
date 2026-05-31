@@ -4,5 +4,9 @@
     file: hosts.yml
 
 - name: Check if cgroups is configured correctly
-  ansible.builtin.include_tasks: 
+  ansible.builtin.include_tasks:
     file: cgroups.yml
+
+- name: Configure network interfaces
+  ansible.builtin.include_tasks:
+    file: network.yml

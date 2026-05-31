@@ -1,0 +1,18 @@
+---
+- name: Configure static IP on end0 for backend VLAN
+  community.general.nmcli:
+    conn_name: backend-vlan
+    ifname: end0
+    type: ethernet
+    ip4: "{{ backend_vlan_ip }}/{{ backend_vlan_prefix }}"
+    never_default4: true
+    autoconnect: true
+    state: present
+  become: true
+
+- name: Bring up backend-vlan connection
+  ansible.builtin.command: nmcli connection up backend-vlan
+  become: true
+  register: nmcli_up
+  changed_when: "'successfully activated' in nmcli_up.stdout"
+  failed_when: nmcli_up.rc != 0 and 'already active' not in nmcli_up.stderr
