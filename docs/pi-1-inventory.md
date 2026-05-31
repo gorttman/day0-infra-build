@@ -6,7 +6,8 @@
 **OS:** Debian GNU/Linux 13 (trixie)  
 **Kernel:** 6.12.47+rpt-rpi-2712  
 **Arch:** arm64 (Pi 5)  
-**Audited:** 2026-05-31
+**Audited:** 2026-05-31  
+**Last updated:** 2026-05-31 (fixes applied — see §10)
 
 ---
 
@@ -72,7 +73,7 @@ PXE/DHCP/TFTP is **not running on the host directly** — it runs as Kubernetes 
 
 | Workload | Image | Role |
 |----------|-------|------|
-| `dhcpd` (Deployment, 0/1 — CrashLoopBackOff) | `ghcr.io/gorttman/dhcpd:latest` | ISC DHCP with PXE options for backend VLAN |
+| `dhcpd` (Deployment, 1/1 Running) | `ghcr.io/gorttman/dhcpd:latest` | ISC DHCP with PXE options for backend VLAN |
 | `pxe-http` (Deployment, 2/2 Running) | `nginx:1.25-alpine` + `ghcr.io/gorttman/tftp:latest` | HTTP server + TFTP server for boot files |
 
 The host has `tftp-hpa` installed as a client only (not the server daemon).
@@ -105,12 +106,11 @@ boot
 
 ### Ansible tasks needed
 - Apply k8s manifests for `infra/dhcpd` and `infra/pxe-http` (managed via ArgoCD — see §3)
-- The `dhcpd` pod is currently in CrashLoopBackOff — **this is an open issue**
 - TFTP boot files must be pre-populated in the volume mounted by `pxe-http`
-- `end0` (the wired NIC at 88:a2:9e:2e:af:a0) needs a static IP of 192.168.1.10 on the backend VLAN for TFTP/next-server to work
+- `end0` must have static IP 192.168.1.10/27 (NM connection `backend-vlan`) — see §8
 
-### Warning — end0 has no IP
-The wired interface `end0` currently has no IP address assigned. The backend VLAN (192.168.1.x) has no host-level route. This means the pi is reachable only over wlan0 (192.168.2.10). The NFS/TFTP next-server IP 192.168.1.10 must come from end0 — this is missing and needs to be configured.
+### Note — dhcpd interface binding
+The `dhcpd` deployment uses `hostNetwork: true` and binds to `end0` (Pi 5 predictable interface name). The manifest in `day1-foundation/apps/dhcpd/dhcpd-deploy.yml` was previously hardcoded to `eth0` which caused 213 days of CrashLoopBackOff. Fixed 2026-05-31.
 
 ---
 
@@ -128,9 +128,7 @@ The wired interface `end0` currently has no IP address assigned. The backend VLA
 | Node | Status | Role | IP | Version |
 |------|--------|------|----|---------|
 | k8smaster | Ready | control-plane,master | 192.168.2.10 | v1.33.5+k3s1 |
-| pinode-01 | NotReady | worker | 192.168.2.11 | v1.33.6+k3s1 |
-
-pinode-01 is NotReady — consistent with dhcpd CrashLoopBackOff / netboot issue.
+| pinode-01 | Ready | worker | 192.168.2.11 | v1.33.6+k3s1 |
 
 ### k3s service config
 - Unit: `/etc/systemd/system/k3s.service`
@@ -145,12 +143,12 @@ pinode-01 is NotReady — consistent with dhcpd CrashLoopBackOff / netboot issue
 | kube-system | coredns, traefik, metrics-server, local-path-provisioner, sealed-secrets-controller |
 | argocd | Full ArgoCD stack (application-controller, server, repo-server, dex, redis, notifications) |
 | cert-manager | cert-manager + cainjector + webhook |
-| infra | dhcpd (broken), pxe-http |
+| infra | dhcpd (healthy), pxe-http |
 | ingress-nginx | ingress-nginx-controller |
 | portainer | portainer |
 | kubernetes-dashboard | dashboard + metrics-scraper |
-| logging | syslog-ng, log-archiver (both stuck ContainerCreating/Terminating) |
-| nfs-provisioner | nfs-client-provisioner (stuck ContainerCreating) |
+| logging | syslog-ng (running), log-archiver CronJob (completing at 02:00 daily) |
+| nfs-provisioner | nfs-client-provisioner |
 
 ### Node labels (no custom labels beyond k3s defaults)
 Both nodes only carry built-in labels (`kubernetes.io/arch=arm64`, `kubernetes.io/os=linux`, etc.). No custom labels applied.
@@ -319,7 +317,7 @@ ff02::2     ip6-allrouters
 ### Interfaces
 | Interface | Type | IP | Notes |
 |-----------|------|----|-------|
-| `end0` (enx88a29e2eafa0) | Wired | **None** | Should be 192.168.1.10 for backend VLAN |
+| `end0` (enx88a29e2eafa0) | Wired | 192.168.1.10/27 (static) | Backend VLAN — NM connection `backend-vlan` |
 | `wlan0` (wlx88a29e2eafa1) | WiFi | 192.168.2.10/24 (DHCP) | Primary management/cluster IP |
 | `docker0` | Docker bridge | 172.17.0.1/16 | |
 | `flannel.1` | k3s overlay | 10.42.0.0/32 | |
@@ -332,7 +330,7 @@ Via `wlan0` → 192.168.2.1 (WiFi gateway)
 `search i3sec.com.au`, `nameserver 192.168.2.1`
 
 ### NetworkManager
-Only one connection profile found (meta file only, no `.nmconnection` content). WiFi credentials not visible. The wired `end0` has no NM profile — this is the gap that leaves the backend VLAN unreachable from the host.
+Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan` (static 192.168.1.10/27 on end0, added 2026-05-31, `ipv4.never-default yes`).
 
 ### Ansible tasks needed
 ```yaml
@@ -342,6 +340,7 @@ Only one connection profile found (meta file only, no `.nmconnection` content). 
     ifname: end0
     type: ethernet
     ip4: 192.168.1.10/27
+    gw4: ""
     state: present
 ```
 
@@ -351,12 +350,45 @@ Only one connection profile found (meta file only, no `.nmconnection` content). 
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| `end0` has no IP | High | Backend VLAN (192.168.1.x) unreachable from host; NFS exports to workers are broken at host level |
-| `dhcpd` pod CrashLoopBackOff (213d) | High | Workers cannot PXE boot; root cause unknown — check pod logs |
-| `pinode-01` NotReady | High | Worker node down — likely downstream of dhcpd/netboot failure |
-| `nfs-client-provisioner` stuck ContainerCreating (134d) | Medium | Dynamic NFS PVC provisioning broken |
-| `logging/syslog-ng` + `log-archiver` stuck Terminating/ContainerCreating (134d) | Medium | Log shipping broken |
 | Cloudflare Tunnel not found | Low | May not be deployed yet or running as a k8s workload not yet inspected |
 | No k3s `config.yaml` | Low | All k3s config is default — document intended flags before rebuild |
 | WiFi as primary interface | Low | If WiFi drops, cluster loses management access; consider making eth static+primary |
 | `kubeseal` version unknown | Low | Pin version in Ansible var before rebuild |
+
+---
+
+## 10. Fixes Applied 2026-05-31
+
+### Fix 1 — end0 static IP (backend VLAN)
+**Problem:** `end0` had no IP, making 192.168.1.0/27 unreachable from the host.  
+**Fix:** Created NM connection `backend-vlan` with static IP 192.168.1.10/27, `ipv4.never-default yes`.  
+**Command:** `nmcli connection add type ethernet ifname end0 con-name backend-vlan ipv4.method manual ipv4.addresses 192.168.1.10/27 ipv4.never-default yes connection.autoconnect yes`  
+**Ansible:** `nmcli` task — see §8.
+
+### Fix 2 — dhcpd CrashLoopBackOff (213 days)
+**Problem:** `day1-foundation/apps/dhcpd/dhcpd-deploy.yml` bound dhcpd to `eth0`. Pi 5 uses predictable interface naming (`end0`). With `hostNetwork: true` the container sees host interfaces directly — `eth0` doesn't exist, so dhcpd exited immediately.  
+**Fix:** Changed `eth0` → `end0` in the deployment args. Committed to `day1-foundation` and ArgoCD synced.  
+**Result:** dhcpd `1/1 Running`, listening on `LPF/end0/88:a2:9e:2e:af:a0/192.168.1.0/27`.
+
+### Fix 3 — pinode-01 NotReady
+**Cause:** Downstream of Fix 2 — worker had lost DHCP/netboot connectivity.  
+**Result:** Came Ready automatically once dhcpd was serving. No manual intervention needed.
+
+### Fix 4 — log-archiver CreateContainerConfigError
+**Problem:** Secret `log-archiver-secret` did not exist. The manifest `log-archiver-secret.yml` created a secret named `nas-config` — name mismatch with what the CronJob referenced.  
+**Fix:** Corrected secret name to `log-archiver-secret`, updated `NFS_EXPORT_PATH` from `/volume1/syslog-archive` to `/syslog-archive`, set `ARCHIVE_DAYS` to `3`.
+
+### Fix 5 — log-archiver apk failure (wakeonlan not in Alpine)
+**Problem:** `apk add wakeonlan` fails on Alpine — package doesn't exist. Because bash wasn't installed (the apk failed), the `#!/bin/bash` script returned "not found".  
+**Fix:** Split apk installs — core packages (`bash nfs-utils iputils coreutils`) in one call, `etherwake` in a second call with `|| true`. Updated `wake_nas()` in the configmap to prefer `etherwake`.
+
+### Fix 6 — log-archiver wrong NFS export path
+**Problem:** `NFS_EXPORT_PATH=/srv/nas/logs` — path doesn't exist on the NAS.  
+**Discovery:** `showmount -e 192.168.1.30` showed actual exports; correct path is `/syslog-archive`.  
+**Fix:** Updated secret value to `/syslog-archive`.
+
+### Fix 7 — QNAP NAS access denied for /syslog-archive
+**Problem:** Even with the correct path, mount returned "access denied". The QNAP NFS config at `/etc/config/nfssetting` had no entry for `syslog-archive` — only `homes`, `nfsroot`, `Public`, `tftpboot` were enabled for NFS.  
+**NAS details:** valinor-m, 192.168.1.30, QNAP, admin/admin SSH, QNAP kernel 3.4.6.  
+**Fix:** Added `syslog-archive` to all sections of `/etc/config/nfssetting` (Access, AllowIP `*`, Permission `rw`, SquashOption `no_root_squash`, AnonUID/GID `65534`), then ran `/etc/init.d/nfs.sh restart`.  
+**Result:** log-archiver CronJob now completes cleanly at 02:00 daily.
