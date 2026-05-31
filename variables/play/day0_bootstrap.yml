@@ -9,6 +9,8 @@ variable_files:
   - name: git
     path: common
 
+argocd_version: "v3.2.0"
+
 kubeconfig: /etc/rancher/k3s/k3s.yaml
 bootstrap_app_path: "{{ staging_dir }}/argo_bootstrap.yml"
 argocd_https_port: 30443

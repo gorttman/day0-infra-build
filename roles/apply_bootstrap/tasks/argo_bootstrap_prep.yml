@@ -14,5 +14,5 @@
     kubeconfig: "{{ kubeconfig }}"
     namespace: argocd
     state: present
-    src: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+    src: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
 

@@ -1,0 +1,199 @@
+# k8smaster Rebuild Runbook
+
+Full rebuild sequence for pi-1 (k8smaster) from bare metal to a running cluster.
+After the Ansible run, ArgoCD pulls all k8s workloads from git automatically.
+
+**Estimated time:** ~30–45 minutes end-to-end.
+
+---
+
+## Prerequisites
+
+- Raspberry Pi 5 with fresh Debian trixie SD card
+- A second SD card with Raspberry Pi OS (for NFS rootfs import — inserted into Pi during step 4)
+- SSH access to the Pi from your Ansible control machine
+- This repo cloned locally: `git clone git@github.com:gorttman/day0-infra-build.git`
+
+---
+
+## Step 1 — Flash and pre-configure the OS
+
+Flash Debian trixie (or Raspberry Pi OS Lite 64-bit) to the primary SD card.
+
+**Before first boot**, pre-configure WiFi by creating `/etc/wpa_supplicant/wpa_supplicant.conf` on the boot partition:
+
+```
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=AU
+
+network={
+    ssid="YOUR_SSID"
+    psk="YOUR_PASSWORD"
+}
+```
+
+Also set the hostname to `k8smaster` in `/etc/hostname` and add `127.0.1.1 k8smaster` to `/etc/hosts`.
+
+Boot the Pi. Verify SSH access:
+```bash
+ssh gorttman@<pi-ip>
+```
+
+---
+
+## Step 2 — Create the git PAT credential file
+
+The Ansible bootstrap needs a GitHub personal access token to give ArgoCD access to the private repos. Create it on the Pi before running the playbook:
+
+```bash
+mkdir -p credentials/git-pat
+echo "YOUR_GITHUB_PAT" > credentials/git-pat/token.txt
+```
+
+The token needs `repo` scope for all repos in `day0_bootstrap.yml` (`bootstrap_repos` + `config_repos`).
+
+---
+
+## Step 3 — Run the Day-0 bootstrap
+
+From your Ansible control machine (or directly on the Pi):
+
+```bash
+ansible-playbook day0-infra-build.yml \
+  --tags install_day0 \
+  -i inventory/hosts \
+  -u gorttman \
+  --ask-become-pass
+```
+
+This runs in order:
+1. `prep_prerequisites` — cgroups in cmdline.txt, /etc/hosts, backend-vlan NM connection (end0 → 192.168.1.10/27), NTP servers
+2. `install_required_software` — apt packages, k3s, kubeseal v0.27.1
+3. `apply_bootstrap` — installs ArgoCD v3.2.0, registers git repos, applies bootstrap Application
+4. `install_helper_scripts` — copies seal_secret.sh to /usr/local/bin
+5. `credentials_out` — prints ArgoCD URL and initial admin password
+
+**If cgroups weren't already set**, the Pi will reboot mid-run. Re-run the playbook after it comes back up — it is idempotent.
+
+---
+
+## Step 4 — Set up NFS for worker netboot
+
+Insert the Raspberry Pi OS SD card into the Pi's second SD slot, then:
+
+```bash
+ansible-playbook day0-infra-build.yml \
+  --tags manage_nfs \
+  -i inventory/hosts \
+  -u gorttman \
+  --ask-become-pass
+```
+
+This:
+- Creates `/srv/nfs/{rpios/latest,cluster,syslog-store}`
+- Configures `/etc/exports` and `/etc/nfs.conf` (NFSv3 + NFSv4.2, manage-gids)
+- Copies the Pi OS golden image from the SD card into `/srv/nfs/rpios/latest`
+- Sets up TFTP directory structure for netboot
+
+---
+
+## Step 5 — Manual: QNAP NAS export
+
+The log-archiver CronJob mounts `/syslog-archive` from valinor-m (192.168.1.30). This is not automated.
+
+```bash
+ssh admin@192.168.1.30   # password: admin
+```
+
+Edit `/etc/config/nfssetting` — add `syslog-archive` to all six sections:
+
+```ini
+[Access]
+/share/CACHEDEV1_DATA/syslog-archive = TRUE
+
+[AllowIP]
+/share/CACHEDEV1_DATA/syslog-archive = *
+
+[Permission]
+/share/CACHEDEV1_DATA/syslog-archive = rw
+
+[SquashOption]
+/share/CACHEDEV1_DATA/syslog-archive = no_root_squash
+
+[AnonUID]
+/share/CACHEDEV1_DATA/syslog-archive = 65534
+
+[AnonGID]
+/share/CACHEDEV1_DATA/syslog-archive = 65534
+```
+
+Then reload:
+```bash
+/etc/init.d/nfs.sh restart
+```
+
+---
+
+## Step 6 — Wait for ArgoCD to sync
+
+ArgoCD was bootstrapped in step 3. It will now pull and apply all workloads from:
+- `day0-bootstrap` → cluster-level config
+- `day1-foundation` → dhcpd, pxe-http, log-archiver, nfs-provisioner, syslog-server, sealed-secrets, cert-manager, ingress-nginx, ArgoCD apps
+- `day2-services` → pihole
+- `dhcpd-conf` → dhcpd ConfigMap
+
+Monitor sync progress:
+```bash
+kubectl get applications -n argocd
+```
+
+Or via the UI: **https://192.168.2.10:30443** (admin / see ArgoCD secret below)
+
+```bash
+kubectl get secret argocd-initial-admin-secret -n argocd \
+  -o jsonpath='{.data.password}' | base64 -d
+```
+
+All apps should reach `Synced / Healthy` within ~5 minutes.
+
+---
+
+## Step 7 — Verify the cluster
+
+```bash
+# Both nodes Ready
+kubectl get nodes
+
+# All apps green
+kubectl get applications -n argocd
+
+# No broken pods
+kubectl get pods -A | grep -v "Running\|Completed"
+
+# dhcpd serving backend VLAN
+kubectl logs -n infra deployment/dhcpd | grep Listening
+```
+
+---
+
+## Key versions
+
+| Component | Version | Pinned in |
+|-----------|---------|-----------|
+| ArgoCD | v3.2.0 | `variables/play/day0_bootstrap.yml` → `argocd_version` |
+| kubeseal | v0.27.1 | `roles/install_required_software/tasks/install_required_software_curl.yml` |
+| k3s | latest stable | `get.k3s.io` script — not pinned |
+| pihole | 2024.07.0 | `day2-services/apps/pihole/pihole-deployment.yml` |
+
+---
+
+## Post-rebuild checklist
+
+- [ ] Both nodes Ready (`kubectl get nodes`)
+- [ ] All ArgoCD apps Synced/Healthy
+- [ ] dhcpd listening on `LPF/end0/...`
+- [ ] pinode-01 joins cluster
+- [ ] pihole resolving DNS
+- [ ] log-archiver CronJob completes at 02:00
+- [ ] ArgoCD UI accessible at https://192.168.2.10:30443
