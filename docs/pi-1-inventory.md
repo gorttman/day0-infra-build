@@ -7,7 +7,7 @@
 **Kernel:** 6.12.47+rpt-rpi-2712  
 **Arch:** arm64 (Pi 5)  
 **Audited:** 2026-05-31  
-**Last updated:** 2026-05-31 (fixes applied — see §10)
+**Last updated:** 2026-06-01 (pihole fixes — see §10)
 
 ---
 
@@ -149,6 +149,7 @@ The `dhcpd` deployment uses `hostNetwork: true` and binds to `end0` (Pi 5 predic
 | kubernetes-dashboard | dashboard + metrics-scraper |
 | logging | syslog-ng (running), log-archiver CronJob (completing at 02:00 daily) |
 | nfs-provisioner | nfs-client-provisioner |
+| pihole | pihole (healthy) — DNS at 192.168.2.10:53 / 192.168.2.11:53, web UI via traefik ingress |
 
 ### Node labels (no custom labels beyond k3s defaults)
 Both nodes only carry built-in labels (`kubernetes.io/arch=arm64`, `kubernetes.io/os=linux`, etc.). No custom labels applied.
@@ -392,3 +393,28 @@ Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan`
 **NAS details:** valinor-m, 192.168.1.30, QNAP, admin/admin SSH, QNAP kernel 3.4.6.  
 **Fix:** Added `syslog-archive` to all sections of `/etc/config/nfssetting` (Access, AllowIP `*`, Permission `rw`, SquashOption `no_root_squash`, AnonUID/GID `65534`), then ran `/etc/init.d/nfs.sh restart`.  
 **Result:** log-archiver CronJob now completes cleanly at 02:00 daily.
+
+---
+
+## 11. Fixes Applied 2026-06-01
+
+### Fix 8 — pihole namespace missing (day2-services OutOfSync)
+**Problem:** ArgoCD `day2-services` was OutOfSync with error "namespaces 'pihole' not found". The `pihole-namespace.yml` manifest exists but was never applied.  
+**Fix:** Created the `pihole` namespace directly, then triggered ArgoCD resync.
+
+### Fix 9 — pihole Application created in wrong namespace
+**Problem:** `apps/kustomization.yml` had `namespace: pihole` at the top level. Kustomize applied this to all resources including `pihole-app.yml` (an ArgoCD Application), overriding its `namespace: argocd`. ArgoCD only watches its own namespace for Application resources, so pihole was silently never reconciled. A stale Application object sat in the `pihole` namespace for months.  
+**Fix:** Removed `namespace: pihole` from `day2-services/apps/kustomization.yml`. Deleted the misplaced Application from the `pihole` namespace, triggered resync — pihole Application now created in `argocd` namespace correctly.  
+**Repo:** `day2-services` commit `7c57a21`.
+
+### Fix 10 — pihole scheduling failure (hostNetwork port conflict)
+**Problem:** With `hostNetwork: true`, the scheduler treats all declared `containerPorts` as host ports. Ports 80 and 443 were declared, conflicting with traefik's svclb pods on both nodes — pihole could not be scheduled anywhere.  
+**Fix:** Removed ports 80 and 443 from `containerPorts`. Pihole scheduled successfully on pinode-01.  
+**Repo:** `day2-services` commit `c35363d`.
+
+### Fix 11 — pihole liveness probe killing healthy container (hostNetwork vs traefik conflict)
+**Problem:** Even after scheduling, probes returned 404. With `hostNetwork: true`, both pihole (lighttpd) and traefik's svclb nginx compete for port 80 on the host. The kubelet's probe hit traefik (which had no route for `/admin/`) rather than pihole, killing the container every 60s via the liveness probe.  
+**Root cause verified:** `PIHOLE_WEB_PORT` is not a valid pihole env var — lighttpd ignores it. Additionally, Kubernetes auto-injects `PIHOLE_WEB_PORT=tcp://<clusterIP>:80` from the `pihole-web` service, overriding any configmap value.  
+**Fix:** Removed `hostNetwork: true` entirely. Pihole runs in its own network namespace. DNS (port 53) exposed via `LoadBalancer` service at `192.168.2.53` (served by traefik svclb on both nodes). Web UI served on port 80 via the existing `pihole-web` ClusterIP service and traefik ingress at `pihole.pilab.local`.  
+**Repo:** `day2-services` commit `aca07c9`.  
+**Result:** pihole `1/1 Running`, `Synced / Healthy`, zero restarts. DNS at `192.168.2.10:53` / `192.168.2.11:53`.
