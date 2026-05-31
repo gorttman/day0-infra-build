@@ -78,9 +78,9 @@
     content: |
       #!ipxe
       echo Booting Raspberry Pi 5 via HTTP/NFS
-      kernel http://{{ NETBOOT_HTTP_IP }}:{{ NETBOOT_HTTP_PORT }}/netboot/rpi5/{{ kernel_filename }} \
-        root=/dev/nfs nfsroot={{ NFS_SERVER_IP }}:{{ NFS_EXPORT_PATH }}/base rw ip=dhcp console=ttyAMA0,115200 console=tty1
-      initrd http://{{ NETBOOT_HTTP_IP }}:{{ NETBOOT_HTTP_PORT }}/netboot/rpi5/{{ initrd_filename }}
+      kernel http://{{ netboot_http_ip }}:{{ netboot_http_port }}/netboot/rpi5/{{ kernel_filename }} \
+        root=/dev/nfs nfsroot={{ nfs_server_ip }}:{{ nfs_export_path }}/base rw ip=dhcp console=ttyAMA0,115200 console=tty1
+      initrd http://{{ netboot_http_ip }}:{{ netboot_http_port }}/netboot/rpi5/{{ initrd_filename }}
       boot
 
 # --------------------------------------------------------------------

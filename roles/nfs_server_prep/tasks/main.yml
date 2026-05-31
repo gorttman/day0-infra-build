@@ -5,14 +5,14 @@
     state: directory
     mode: "0755"
   loop:
-    - "{{ NFS_EXPORT_PATH }}"
-    - "{{ NFS_EXPORT_PATH }}/base"
-    - "{{ NFS_EXPORT_PATH }}/nodes"
+    - "{{ nfs_export_path }}"
+    - "{{ nfs_export_path }}/base"
+    - "{{ nfs_export_path }}/nodes"
 
 # define your nodes here or pull from inventory/group_vars
 - name: Ensure per-node state/upper/work dirs exist
   ansible.builtin.file:
-    path: "{{ NFS_EXPORT_PATH }}/nodes/{{ item }}/state"
+    path: "{{ nfs_export_path }}/nodes/{{ item }}/state"
     state: directory
     mode: "0777"
   loop: "{{ nfs_nodes | default(['pi-node-01']) }}"
@@ -22,10 +22,10 @@
     dest: /etc/exports.d/pi-lab.exports
     mode: "0644"
     content: |
-      {{ NFS_EXPORT_PATH }}/base  ro,no_subtree_check,fsid=10,async,no_root_squash
+      {{ nfs_export_path }}/base  ro,no_subtree_check,fsid=10,async,no_root_squash
       {% for n in nfs_nodes | default(['pi-node-01']) -%}
-      {{ NFS_EXPORT_PATH }}/nodes/{{ n }}  rw,no_subtree_check,async,no_root_squash
-      {{ NFS_EXPORT_PATH }}/nodes/{{ n }}/state  rw,no_subtree_check,async,no_root_squash
+      {{ nfs_export_path }}/nodes/{{ n }}  rw,no_subtree_check,async,no_root_squash
+      {{ nfs_export_path }}/nodes/{{ n }}/state  rw,no_subtree_check,async,no_root_squash
       {% endfor -%}
   notify: exportfs-reload
 

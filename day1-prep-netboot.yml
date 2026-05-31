@@ -8,26 +8,26 @@
     - netboot_day1
 
   vars_files:
-    - variables/play/day1-prep-netboot.yml
+    - variables/play/day1_prep_netboot.yml
 
   pre_tasks:
     - name: Ensure prerequisite configuration is applied
       import_role:
-        name: prep-prerequisites
+        name: prep_prerequisites
 
     - name: Install required base software packages
       import_role:
-        name: install-required-software
+        name: install_required_software
 
   tasks:
     - name: Create Raspberry Pi OS (Debian) root filesystem
       import_role:
-        name: prep-rootfs
+        name: prep_rootfs
 
     - name: Install Raspberry Pi kernel and build/init stage for netboot
       import_role:
-        name: prep-kernel
+        name: prep_kernel
 
     - name: Publish kernel/initrd and rootfs to NFS/HTTP exports
       import_role:
-        name: publish-nfs-os
+        name: publish_nfs_os
