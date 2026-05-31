@@ -1,0 +1,13 @@
+---
+- name: Configure NTP servers in timesyncd
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/timesyncd.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - regexp: '^#?NTP='
+      line: 'NTP=0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org 3.pool.ntp.org'
+    - regexp: '^#?FallbackNTP='
+      line: 'FallbackNTP=time.google.com time.cloudflare.com'
+  become: true
+  notify: Restart timesyncd

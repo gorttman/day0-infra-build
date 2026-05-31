@@ -10,3 +10,7 @@
 - name: Configure network interfaces
   ansible.builtin.include_tasks:
     file: network.yml
+
+- name: Configure NTP
+  ansible.builtin.include_tasks:
+    file: timesyncd.yml

@@ -11,6 +11,21 @@
     - "{{ nfs_root_base }}"
     - "{{ nfs_os_path }}"
     - "{{ nfs_cluster_path }}"
+    - "{{ nfs_root_base }}/syslog-store"
+
+- name: Configure nfs.conf non-defaults
+  ansible.builtin.lineinfile:
+    path: /etc/nfs.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    insertafter: "{{ item.section }}"
+  loop:
+    - { regexp: '^manage-gids', line: 'manage-gids=y', section: '^\[mountd\]' }
+    - { regexp: '^vers3',       line: 'vers3=y',       section: '^\[nfsd\]' }
+    - { regexp: '^vers4\.2',    line: 'vers4.2=y',     section: '^\[nfsd\]' }
+  become: true
+  notify:
+    - Restart NFS server
 
 - name: Configure NFS exports
   ansible.builtin.template:
