@@ -1,0 +1,15 @@
+galaxy_info:
+  role_name: shared-workspace
+  author: gorttman
+  description: Shared workspace role for dynamic variable loading and environment setup
+  license: MIT
+  min_ansible_version: "2.13"
+  platforms:
+    - name: EL
+      versions: [8, 9]
+    - name: Ubuntu
+      versions: [20.04, 22.04]
+    - name: MacOSX
+      versions: [10.15, 11, 12]
+
+dependencies: []

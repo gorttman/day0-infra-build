@@ -1,0 +1,8 @@
+---
+- name: Load vars files
+  ansible.builtin.include_tasks:
+    file: load_vars_files.yml
+
+- name: Load vars files
+  ansible.builtin.include_tasks:
+    file: ensure_staging_dir_exists.yml
