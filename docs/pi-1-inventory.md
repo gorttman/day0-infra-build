@@ -7,7 +7,7 @@
 **Kernel:** 6.12.47+rpt-rpi-2712  
 **Arch:** arm64 (Pi 5)  
 **Audited:** 2026-05-31  
-**Last updated:** 2026-06-01 (pihole fixes — see §10)
+**Last updated:** 2026-06-01 (rebuild gap audit — see §9, §10, §11)
 
 ---
 
@@ -349,12 +349,21 @@ Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan`
 
 ## 9. Open Issues / Gaps
 
+### Rebuild blockers (manual steps required after Ansible run)
+
+| Issue | Severity | Manual fix |
+|-------|----------|-----------|
+| QNAP NAS `/syslog-archive` NFS export | **High** | SSH admin@192.168.1.30, add `syslog-archive` to all sections of `/etc/config/nfssetting`, run `/etc/init.d/nfs.sh restart`. Without this, log-archiver CronJob fails to mount its archive target. See §10 Fix 7 for exact commands. |
+| WiFi credentials | **High** | WiFi is the primary management interface (192.168.2.10). Credentials are not in any repo — must be configured via `nmcli` or `raspi-config` before Ansible can connect. |
+
+### Non-blockers
+
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| Cloudflare Tunnel not found | Low | May not be deployed yet or running as a k8s workload not yet inspected |
-| No k3s `config.yaml` | Low | All k3s config is default — document intended flags before rebuild |
-| WiFi as primary interface | Low | If WiFi drops, cluster loses management access; consider making eth static+primary |
-| `kubeseal` version unknown | Low | Pin version in Ansible var before rebuild |
+| Cloudflare Tunnel not found | Low | Not yet deployed or not yet inspected in k8s workloads |
+| No k3s `config.yaml` | Low | All k3s flags are defaults — document intended flags before next rebuild |
+| WiFi as primary interface | Low | If WiFi drops, cluster loses management access; `end0` is wired backup but only has 192.168.1.10 (backend VLAN, not routed to internet) |
+| `kubeseal` version pinned to v0.27.1 | Low | Verify this matches the sealed-secrets-controller version running in the cluster before rebuild |
 
 ---
 
