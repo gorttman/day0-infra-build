@@ -98,8 +98,9 @@
   
   vars_files:
     - variables/common/set_environment.yml
+    - variables/play/day0_bootstrap.yml
     - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '_') }}.yml"
-  
+
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed
       ansible.builtin.command:
@@ -111,7 +112,7 @@
     - name: Run shared workspace role
       ansible.builtin.include_role:
         name: shared_workspace
-  
+
   tasks:
     - name: Add netboot node configuration
       ansible.builtin.include_role:

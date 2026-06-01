@@ -1,0 +1,104 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/discover_nodes.yml
+################################################################################
+---
+# Finds new Pi nodes by comparing dhcpd DHCPDISCOVER logs against known
+# hardware ethernet entries in the live dhcpd ConfigMap. Sets new_nodes fact.
+
+- name: Get dhcpd pod info
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: Pod
+    namespace: infra
+    label_selectors:
+      - app=dhcpd
+  register: dhcpd_pod_info
+
+- name: Fail if dhcpd pod not found
+  ansible.builtin.fail:
+    msg: "No dhcpd pods found in infra namespace — is the cluster running?"
+  when: dhcpd_pod_info.resources | length == 0
+
+- name: Fetch dhcpd pod logs
+  kubernetes.core.k8s_log:
+    kubeconfig: "{{ kubeconfig }}"
+    namespace: infra
+    name: "{{ dhcpd_pod_info.resources[0].metadata.name }}"
+  register: dhcpd_log
+
+- name: Extract MACs seen in DHCPDISCOVER entries
+  ansible.builtin.set_fact:
+    discovered_macs: >-
+      {{
+        dhcpd_log.log
+        | regex_findall('DHCPDISCOVER from ((?:[0-9a-f]{2}:){5}[0-9a-f]{2})')
+        | map('lower') | list | unique
+      }}
+
+- name: Get dhcpd ConfigMap to identify already-known MACs and assigned IPs
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: ConfigMap
+    namespace: infra
+    name: dhcpd-config
+  register: dhcpd_cm
+
+- name: Extract known MACs from live dhcpd config
+  ansible.builtin.set_fact:
+    known_macs: >-
+      {{
+        dhcpd_cm.resources[0].data['dhcpd.conf']
+        | regex_findall('hardware ethernet ((?:[0-9a-f]{2}:){5}[0-9a-f]{2})')
+        | map('lower') | list
+      }}
+
+- name: Identify new (unregistered) MACs
+  ansible.builtin.set_fact:
+    new_macs: "{{ discovered_macs | difference(known_macs) }}"
+
+- name: Fail if no new nodes discovered
+  ansible.builtin.fail:
+    msg: >-
+      No new nodes found in dhcpd logs.
+      Boot the new Pi on the backend VLAN (192.168.1.x), wait for a DHCPDISCOVER
+      to appear in dhcpd logs, then re-run with --tags manage_nodes.
+  when: new_macs | length == 0
+
+- name: Find already-assigned IP octets in backend VLAN range
+  ansible.builtin.set_fact:
+    assigned_octets: >-
+      {{
+        dhcpd_cm.resources[0].data['dhcpd.conf']
+        | regex_findall('fixed-address 192\.168\.1\.([0-9]+)')
+        | map('int') | list
+      }}
+
+- name: Compute next available IPs for new nodes
+  ansible.builtin.set_fact:
+    available_octets: >-
+      {{ (range(11, 31) | list | difference(assigned_octets) | sort)[:(new_macs | length)] }}
+
+- name: Fail if not enough IPs remain in 192.168.1.11-30
+  ansible.builtin.fail:
+    msg: >-
+      Not enough free IPs in 192.168.1.11-30 to register {{ new_macs | length }}
+      new node(s). Assigned: {{ assigned_octets | sort | join(', ') }}
+  when: available_octets | length < new_macs | length
+
+- name: Build new_nodes list
+  ansible.builtin.set_fact:
+    new_nodes: >-
+      {{
+        new_nodes | default([]) + [{
+          'mac':        item[0],
+          'mac_suffix': (item[0] | replace(':', ''))[-6:],
+          'name':       'pinode-' + (item[0] | replace(':', ''))[-6:],
+          'ip':         '192.168.1.' + (item[1] | string)
+        }]
+      }}
+  loop: "{{ new_macs | zip(available_octets) | list }}"
+
+- name: Display new nodes to be registered
+  ansible.builtin.debug:
+    msg: "Registering {{ item.name }} — MAC {{ item.mac }} — IP {{ item.ip }}"
+  loop: "{{ new_nodes }}"

@@ -1,9 +1,32 @@
 ################################################################################
-# FILE: variables/play/day1-node-prep.yml
+# FILE: variables/play/day1_node_prep.yml
 ################################################################################
 ---
-# Nodes to configure
-nodes:
-- name: pinode-01
-  mac: "2c:cf:67:27:93:f1"
-  mac_suffix: "2793f1"
+# NFS paths (must match day0_nfs_prep.yml)
+nfs_root_base: "/srv/nfs"
+nfs_os_path: "{{ nfs_root_base }}/rpios/latest"
+nfs_cluster_path: "{{ nfs_root_base }}/cluster"
+
+# TFTP/HTTP boot file root (served by pxe-http pod)
+tftp_root: "/var/www/html/netboot/rpi5"
+
+# Network
+nfs_server_ip: "192.168.1.10"
+nfs_network: "192.168.1.0/27"
+nfs_mount_opts: "vers=4.2,hard,timeo=600,retrans=10,noacl,nocto"
+
+# Kernel cmdline written into each node's cmdline.txt
+kernel_params: >-
+  console=serial0,115200 console=tty1
+  root=/dev/nfs
+  nfsroot={{ nfs_server_ip }}:/srv/nfs/rpios/latest,{{ nfs_mount_opts }},rw
+  ip=dhcp rootwait elevator=deadline rootfstype=nfs fsck.repair=yes
+  plymouth.ignore-serial-consoles
+  cgroup_memory=1 cgroup_enable=memory consoleblank=0
+
+# dhcpd-conf repo (updated when a new node is registered)
+dhcpd_conf_repo: "https://github.com/{{ git_org }}/dhcpd-conf.git"
+
+# Set to true to force re-copy of shared boot files into tftp_root/base/
+# even if they already exist. Use when updating the OS golden image.
+force_boot_files: false

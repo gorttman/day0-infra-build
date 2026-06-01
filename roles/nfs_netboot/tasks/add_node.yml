@@ -1,0 +1,24 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/add_node.yml
+################################################################################
+---
+# Onboards a new Pi worker node. Workflow:
+#   1. Boot the new Pi — it sends DHCPDISCOVER on the backend VLAN
+#   2. Run: ansible-playbook day0-infra-build.yml --tags manage_nodes
+#   3. Reboot the new Pi — it netboots and joins the cluster
+
+- name: Discover new nodes from dhcpd logs
+  ansible.builtin.include_tasks: discover_nodes.yml
+
+- name: Create NFS cluster storage for new nodes
+  ansible.builtin.include_tasks: configure_node_storage.yml
+  vars:
+    nodes: "{{ new_nodes }}"
+
+- name: Set up TFTP boot structure for new nodes
+  ansible.builtin.include_tasks: setup_tftp_structure.yml
+  vars:
+    nodes: "{{ new_nodes }}"
+
+- name: Register new nodes in dhcpd-conf repo
+  ansible.builtin.include_tasks: register_dhcp.yml

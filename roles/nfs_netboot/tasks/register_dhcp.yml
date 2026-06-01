@@ -1,0 +1,56 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/register_dhcp.yml
+################################################################################
+---
+# Clones dhcpd-conf, appends a static host reservation for each new node,
+# and pushes. ArgoCD auto-syncs the ConfigMap, dhcpd picks up the new
+# reservation on next pod restart/reload.
+
+- name: Clone dhcpd-conf repo into staging dir
+  ansible.builtin.git:
+    repo: "https://{{ git_token }}@github.com/{{ git_org }}/dhcpd-conf.git"
+    dest: "{{ staging_dir }}/dhcpd-conf"
+    version: main
+    force: false
+  run_once: true
+
+- name: Read current dhcpd.conf content
+  ansible.builtin.slurp:
+    src: "{{ staging_dir }}/dhcpd-conf/dhcpd.conf"
+  register: dhcpd_conf_raw
+  run_once: true
+
+- name: Append static reservation for each new node
+  ansible.builtin.blockinfile:
+    path: "{{ staging_dir }}/dhcpd-conf/dhcpd.conf"
+    marker: "# {mark} {{ item.name }}"
+    block: |
+      host {{ item.name }} {
+        hardware ethernet {{ item.mac }};
+        fixed-address {{ item.ip }};
+        next-server {{ backend_vlan_ip }};
+        option tftp-server-name "{{ backend_vlan_ip }}";
+        option bootfile-name "{{ item.name }}/start4.elf";
+        filename "{{ item.name }}/start4.elf";
+      }
+  loop: "{{ new_nodes }}"
+  when: item.mac not in (dhcpd_conf_raw.content | b64decode)
+  run_once: true
+
+- name: Commit and push dhcpd.conf changes
+  ansible.builtin.shell:
+    cmd: |
+      cd {{ staging_dir }}/dhcpd-conf
+      git config user.email "ansible@{{ ansible_hostname }}"
+      git config user.name "Ansible (day0-infra-build)"
+      git add dhcpd.conf
+      if git diff --cached --quiet; then
+        echo "no-changes"
+      else
+        git commit -m "feat: register {{ new_nodes | map(attribute='name') | join(', ') }}"
+        git push
+      fi
+    executable: /bin/bash
+  register: git_push_result
+  changed_when: "'no-changes' not in git_push_result.stdout"
+  run_once: true
