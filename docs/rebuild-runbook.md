@@ -63,7 +63,6 @@ From your Ansible control machine (or directly on the Pi):
 ```bash
 ansible-playbook day0-infra-build.yml \
   --tags install_day0 \
-  -i inventory/hosts \
   -u gorttman \
   --ask-become-pass
 ```
@@ -86,7 +85,6 @@ Insert the Raspberry Pi OS SD card into the Pi's second SD slot, then:
 ```bash
 ansible-playbook day0-infra-build.yml \
   --tags manage_nfs \
-  -i inventory/hosts \
   -u gorttman \
   --ask-become-pass
 ```

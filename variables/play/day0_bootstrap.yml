@@ -1,5 +1,5 @@
 git_user: oauth2
-git_org: your-org-name
+git_org: gorttman
 git_token: "{{ lookup('file', playbook_dir + '/credentials/git-pat/token.txt') | trim }}"
 variable_files: 
   - name: workspace

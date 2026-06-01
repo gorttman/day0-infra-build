@@ -13,14 +13,6 @@ _Nothing currently in flight._
 
 ## Todo
 
-### Fix: runbook playbook commands still include `-i inventory/hosts`
-`docs/rebuild-runbook.md` steps 3 and 4 still pass `-i inventory/hosts` but `ansible.cfg` now sets the inventory. Commands will still work (flag overrides cfg) but it's misleading and should be cleaned up.
-- **File:** `docs/rebuild-runbook.md` lines ~64, ~87
-
-### Fix: `git_org: your-org-name` placeholder in day0_bootstrap.yml
-Stale placeholder that gets silently overridden by `variables/common/git.yml` at runtime so nothing breaks, but it's confusing to anyone reading the file.
-- **File:** `variables/play/day0_bootstrap.yml` line 2
-
 ### Fix: inventory §6 kubeseal listed as "version unknown"
 kubeseal is actually pinned to v0.27.1 in `roles/install_required_software/tasks/install_required_software_curl.yml`. The inventory doc is stale.
 - **File:** `docs/pi-1-inventory.md` §6
