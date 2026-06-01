@@ -5,3 +5,10 @@
 {{ nfs_root_base }} {{ nfs_network }}({{ nfs_export_opts }},fsid=0,crossmnt)
 {{ nfs_os_path }} {{ nfs_network }}({{ nfs_export_opts }},nohide)
 {{ nfs_cluster_path }} {{ nfs_network }}({{ nfs_export_opts }},nohide)
+
+# NFSv3 insecure duplicates (required for worker netboot via NFSv3)
+{{ nfs_os_path }} {{ nfs_network }}({{ nfs_export_opts }},insecure)
+{{ nfs_cluster_path }} {{ nfs_network }}({{ nfs_export_opts }},insecure)
+
+# Syslog storage (log-archiver CronJob mount target)
+{{ nfs_root_base }}/syslog-store {{ nfs_network }}({{ nfs_export_opts }},insecure)
