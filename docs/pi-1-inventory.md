@@ -354,7 +354,7 @@ Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan`
 | Issue | Severity | Manual fix |
 |-------|----------|-----------|
 | QNAP NAS `/syslog-archive` NFS export | **High** | SSH admin@192.168.1.30, add `syslog-archive` to all sections of `/etc/config/nfssetting`, run `/etc/init.d/nfs.sh restart`. Without this, log-archiver CronJob fails to mount its archive target. See §10 Fix 7 for exact commands. |
-| WiFi credentials | **High** | WiFi is the primary management interface (192.168.2.10). Credentials are not in any repo — must be configured via `nmcli` or `raspi-config` before Ansible can connect. |
+| WiFi credentials | **Closed** | Stored in `credentials/wifi/{ssid,psk}` (gitignored). `prep_prerequisites/network.yml` configures the NM connection automatically. Initial console access (keyboard/USB serial/ethernet) required on first boot only. |
 
 ### Non-blockers
 

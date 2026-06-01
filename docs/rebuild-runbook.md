@@ -16,42 +16,43 @@ After the Ansible run, ArgoCD pulls all k8s workloads from git automatically.
 
 ---
 
-## Step 1 — Flash and pre-configure the OS
+## Step 1 — Flash the OS and get initial console access
 
 Flash Debian trixie (or Raspberry Pi OS Lite 64-bit) to the primary SD card.
 
-**Before first boot**, pre-configure WiFi by creating `/etc/wpa_supplicant/wpa_supplicant.conf` on the boot partition:
+Boot the Pi. Initial network access before Ansible runs — use whichever is available:
+- **Direct console** (keyboard + monitor): simplest, no network needed
+- **USB serial** (`/dev/ttyUSB0`, 115200 baud)
+- **Ethernet** (`end0`): plug into a machine on the 192.168.1.0/27 network; end0 gets 192.168.1.10 once Ansible runs, but DHCP may give it a temporary address before that
 
-```
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=AU
+WiFi does **not** need to be pre-configured on the SD card. Ansible configures it in step 3 using the credentials you provide in step 2.
 
-network={
-    ssid="YOUR_SSID"
-    psk="YOUR_PASSWORD"
-}
-```
-
-Also set the hostname to `k8smaster` in `/etc/hostname` and add `127.0.1.1 k8smaster` to `/etc/hosts`.
-
-Boot the Pi. Verify SSH access:
+Set the hostname before running Ansible:
 ```bash
-ssh gorttman@<pi-ip>
+hostnamectl set-hostname k8smaster
+echo "127.0.1.1 k8smaster" >> /etc/hosts
 ```
 
 ---
 
-## Step 2 — Create the git PAT credential file
+## Step 2 — Copy credentials onto the Pi
 
-The Ansible bootstrap needs a GitHub personal access token to give ArgoCD access to the private repos. Create it on the Pi before running the playbook:
+Ansible needs two credential files. Both are gitignored and never committed.
 
+**GitHub PAT** (needs `repo` scope for all repos in `day0_bootstrap.yml`):
 ```bash
 mkdir -p credentials/git-pat
 echo "YOUR_GITHUB_PAT" > credentials/git-pat/token.txt
 ```
 
-The token needs `repo` scope for all repos in `day0_bootstrap.yml` (`bootstrap_repos` + `config_repos`).
+**WiFi credentials** (plain text SSID and passphrase):
+```bash
+mkdir -p credentials/wifi
+echo "YOUR_SSID"       > credentials/wifi/ssid
+echo "YOUR_PASSPHRASE" > credentials/wifi/psk
+```
+
+On a rebuild the `credentials/` directory already exists on your secure backup — just copy it across. Ansible reads from these files and configures both ArgoCD repo access and the WiFi NM connection.
 
 ---
 

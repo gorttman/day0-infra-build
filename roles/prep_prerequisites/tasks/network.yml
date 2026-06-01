@@ -1,4 +1,48 @@
 ---
+# === WiFi management interface ===
+# Skipped gracefully if credentials/wifi/ssid does not exist.
+# On first rebuild: copy credentials/wifi/{ssid,psk} onto the Pi
+# (same step as credentials/git-pat/token.txt) then run Ansible.
+
+- name: Check for WiFi credential files
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/wifi/ssid"
+  register: wifi_cred_stat
+
+- name: Configure WiFi management interface
+  when: wifi_cred_stat.stat.exists
+  become: true
+  block:
+    - name: Read WiFi SSID
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/credentials/wifi/ssid"
+      register: wifi_ssid_raw
+
+    - name: Read WiFi PSK
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/credentials/wifi/psk"
+      register: wifi_psk_raw
+
+    - name: Configure WiFi NM connection
+      community.general.nmcli:
+        conn_name: wifi-mgmt
+        ifname: wlan0
+        type: wifi
+        ssid: "{{ wifi_ssid_raw.content | b64decode | trim }}"
+        wifi_sec:
+          key-mgmt: wpa-psk
+          psk: "{{ wifi_psk_raw.content | b64decode | trim }}"
+        autoconnect: true
+        state: present
+
+    - name: Bring up WiFi connection
+      ansible.builtin.command: nmcli connection up wifi-mgmt
+      register: wifi_up
+      changed_when: "'successfully activated' in wifi_up.stdout"
+      failed_when: wifi_up.rc != 0 and 'already active' not in wifi_up.stderr
+
+# === Backend VLAN static IP (end0) ===
+
 - name: Configure static IP on end0 for backend VLAN
   community.general.nmcli:
     conn_name: backend-vlan
