@@ -1,4 +1,0 @@
-roles:
-  - name: shared_workspace
-    src: https://github.com/gorttman/shared-workspace.git
-    version: main

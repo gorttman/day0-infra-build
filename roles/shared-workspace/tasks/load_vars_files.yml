@@ -1,5 +1,0 @@
-- name: Load additional variable files if defined
-  ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/variables/{{ item.path }}/{{ item.name }}.yml"
-  loop: "{{ variable_files }}"
-  when: variable_files is defined

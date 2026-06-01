@@ -1,3 +1,0 @@
----
-- name: exportfs-reload
-  ansible.builtin.command: exportfs -ra
