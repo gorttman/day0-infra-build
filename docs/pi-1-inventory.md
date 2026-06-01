@@ -252,7 +252,7 @@ Beyond standard Debian system packages:
 | `k3s` | `/usr/local/bin/k3s` | Installed via `get.k3s.io` script |
 | `kubectl` | `/usr/local/bin/kubectl` | Symlink to k3s |
 | `crictl` | `/usr/local/bin/crictl` | k3s bundled |
-| `kubeseal` | `/usr/local/bin/kubeseal` | Sealed Secrets CLI — **manually installed, version unknown** |
+| `kubeseal` | `/usr/local/bin/kubeseal` | Sealed Secrets CLI — installed via Ansible, pinned to v0.27.1 |
 | `k3s-killall.sh` | `/usr/local/bin/k3s-killall.sh` | k3s install script artifact |
 | `k3s-uninstall.sh` | `/usr/local/bin/k3s-uninstall.sh` | k3s install script artifact |
 | `seal_secret.sh` | `/usr/local/bin/seal_secret.sh` | Custom GitOps helper script |
@@ -361,9 +361,8 @@ Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan`
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | Cloudflare Tunnel not found | Low | Not yet deployed or not yet inspected in k8s workloads |
-| No k3s `config.yaml` | Low | All k3s flags are defaults — document intended flags before next rebuild |
 | WiFi as primary interface | Low | If WiFi drops, cluster loses management access; `end0` is wired backup but only has 192.168.1.10 (backend VLAN, not routed to internet) |
-| `kubeseal` version pinned to v0.27.1 | Low | Verify this matches the sealed-secrets-controller version running in the cluster before rebuild |
+| `kubeseal` / sealed-secrets-controller version match | Low | `kubeseal` is pinned to v0.27.1 — verify controller image matches before next rebuild: `kubectl get deployment sealed-secrets-controller -n kube-system -o jsonpath='{.spec.template.spec.containers[0].image}'` |
 
 ---
 

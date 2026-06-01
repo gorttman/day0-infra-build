@@ -13,13 +13,7 @@ _Nothing currently in flight._
 
 ## Todo
 
-### Fix: inventory §6 kubeseal listed as "version unknown"
-kubeseal is actually pinned to v0.27.1 in `roles/install_required_software/tasks/install_required_software_curl.yml`. The inventory doc is stale.
-- **File:** `docs/pi-1-inventory.md` §6
-
-### Fix: remove stale k3s config.yaml gap from inventory §9
-"No k3s config.yaml" is listed as a non-blocker gap but it is intentional — latest k3s with defaults is the desired state. Should be removed from the gaps table and noted as a deliberate choice.
-- **File:** `docs/pi-1-inventory.md` §9
+_Nothing currently queued._
 
 ---
 
