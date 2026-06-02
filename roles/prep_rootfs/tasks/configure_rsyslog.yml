@@ -1,0 +1,33 @@
+# FILE: roles/prep-rootfs/tasks/configure_rsyslog.yml
+---
+# Install rsyslog into the staging rootfs and configure forwarding to syslog-ng.
+
+- name: Install rsyslog in rootfs via chroot
+  ansible.builtin.shell: |
+    set -e
+    trap 'umount {{ staging_rootfs }}/dev {{ staging_rootfs }}/sys {{ staging_rootfs }}/proc 2>/dev/null || true' EXIT
+    mount --bind /proc {{ staging_rootfs }}/proc
+    mount --bind /sys  {{ staging_rootfs }}/sys
+    mount --bind /dev  {{ staging_rootfs }}/dev
+    chroot {{ staging_rootfs }} apt-get update -q
+    DEBIAN_FRONTEND=noninteractive chroot {{ staging_rootfs }} apt-get install -y rsyslog
+  become: true
+  args:
+    creates: "{{ staging_rootfs }}/usr/sbin/rsyslogd"
+
+- name: Write rsyslog forwarding config into rootfs
+  ansible.builtin.copy:
+    dest: "{{ staging_rootfs }}/etc/rsyslog.d/99-syslog-ng-forward.conf"
+    mode: "0644"
+    content: |
+      # Forward all logs to central syslog-ng
+      *.* action(type="omfwd" target="{{ syslog_server_ip }}" port="{{ syslog_server_port }}" protocol="tcp"
+               action.resumeRetryCount="100"
+               queue.type="linkedList" queue.size="10000")
+
+- name: Enable rsyslog.service in rootfs
+  ansible.builtin.file:
+    src: "/lib/systemd/system/rsyslog.service"
+    dest: "{{ staging_rootfs }}/etc/systemd/system/multi-user.target.wants/rsyslog.service"
+    state: link
+    force: true

@@ -20,6 +20,9 @@
 - name: Enable essential services in rootfs
   import_tasks: enable_services.yml
 
+- name: Install and configure rsyslog forwarding in rootfs
+  import_tasks: configure_rsyslog.yml
+
 - name: Install systemd per-node NFS mounts and first-boot service
   import_tasks: install_node_overrides.yml
 
