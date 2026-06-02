@@ -7,7 +7,7 @@
 **Kernel:** 6.12.47+rpt-rpi-2712  
 **Arch:** arm64 (Pi 5)  
 **Audited:** 2026-05-31  
-**Last updated:** 2026-06-02 (rsyslog forwarding — see §12)
+**Last updated:** 2026-06-03 (pinode-01 kubelet proxy + containerd fixes — see §13)
 
 ---
 
@@ -125,17 +125,36 @@ The `dhcpd` deployment uses `hostNetwork: true` and binds to `end0` (Pi 5 predic
 - **Internal IP:** 192.168.2.10 (wlan0)
 
 ### Nodes in cluster
-| Node | Status | Role | IP | Version |
-|------|--------|------|----|---------|
-| k8smaster | Ready | control-plane,master | 192.168.2.10 | v1.33.5+k3s1 |
-| pinode-01 | Ready | worker | 192.168.2.11 | v1.33.6+k3s1 |
+| Node | Status | Role | InternalIP | Version |
+|------|--------|------|-----------|---------|
+| k8smaster | Ready | control-plane,master | 192.168.2.10 (wlan0) | v1.33.5+k3s1 |
+| pinode-01 | Ready | worker | 192.168.1.11 (eth0, wired) | v1.33.6+k3s1 |
 
-### k3s service config
+Note: pinode-01's InternalIP is the wired management NIC (`192.168.1.11`), not wlan0 (`192.168.2.11`). WiFi AP isolation prevents direct Pi-to-Pi WiFi communication — both 192.168.2.x IPs are unreachable between nodes. The k3s tunnel WebSocket must traverse the wired network.
+
+### k3s service config (k8smaster)
 - Unit: `/etc/systemd/system/k3s.service`
-- No `/etc/rancher/k3s/config.yaml` — k3s runs with defaults
+- Config: `/etc/rancher/k3s/config.yaml` (see below)
 - No `/etc/systemd/system/k3s.service.env`
-- ExecStart: `/usr/local/bin/k3s server` (no extra flags)
+- ExecStart: `/usr/local/bin/k3s server` (no extra flags — config via config.yaml)
 - Kernel cmdline has `cgroup_memory=1 cgroup_enable=memory` (set in `/boot/firmware/cmdline.txt`)
+
+### /etc/rancher/k3s/config.yaml (k8smaster, exact)
+```yaml
+tls-san:
+  - 192.168.1.10
+advertise-address: 192.168.1.10
+```
+Without `advertise-address`, k3s auto-detects the primary IP (wlan0 / 192.168.2.10) and broadcasts it to agents for the tunnel WebSocket. Workers can't reach that IP (WiFi AP isolation), so the tunnel never connects and `kubectl exec/logs` returns 502. Setting `advertise-address: 192.168.1.10` (management NIC) fixes this. `tls-san` adds the management NIC IP to the server TLS cert so agents can verify it.
+
+### k3s agent config (pinode-01, in per-node etc overlay)
+`/srv/nfs/cluster/pinode-2793f1/etc/rancher/k3s/config.yaml`:
+```yaml
+server: https://192.168.1.10:6443
+token: <redacted>
+node-ip: 192.168.1.11
+```
+`node-ip` pins the node's InternalIP to the wired NIC. Without it, k3s picks wlan0 (192.168.2.11) which k8smaster can't reach for kubelet proxy calls.
 
 ### Namespaces and workloads running
 | Namespace | Key workloads |
@@ -159,6 +178,13 @@ Both nodes only carry built-in labels (`kubernetes.io/arch=arm64`, `kubernetes.i
 # k3s install (idempotent via official script)
 - shell: curl -sfL https://get.k3s.io | sh -
   args: { creates: /usr/local/bin/k3s }
+# Write k3s server config
+- copy:
+    dest: /etc/rancher/k3s/config.yaml
+    content: |
+      tls-san:
+        - 192.168.1.10
+      advertise-address: 192.168.1.10
 # Cgroups in cmdline.txt
 - lineinfile:
     path: /boot/firmware/cmdline.txt
@@ -304,6 +330,7 @@ Files in `/etc` that are newer than `/etc/passwd` and not managed by dpkg/system
 | `/etc/resolv.conf` | `search i3sec.com.au`, `nameserver 192.168.2.1` | Managed by NetworkManager — set via NM connection profile |
 | `/boot/firmware/cmdline.txt` | Added `cgroup_memory=1 cgroup_enable=memory cfg80211.ieee80211_regdom=AU` | `lineinfile` with backrefs |
 | `/etc/rsyslog.d/99-syslog-ng-forward.conf` | Forwards all logs to syslog-ng at `192.168.1.10:30514` (TCP) | Written directly by Ansible — see §12 |
+| `/etc/rancher/k3s/config.yaml` | `tls-san: 192.168.1.10`, `advertise-address: 192.168.1.10` — forces k3s to use management NIC for tunnel | `copy` task — see §3 and §13 |
 
 ### /etc/hosts (exact)
 ```
@@ -484,3 +511,45 @@ Without `externalTrafficPolicy: Local`, kube-proxy masquerades NodePort traffic 
 | Forwarding target (workers) | `192.168.1.10:30514` (management NIC — only NIC reachable from PXE nodes) |
 | rsyslog config in rootfs | `roles/prep_rootfs/tasks/configure_rsyslog.yml` — chroot-installs rsyslog + writes forwarding config |
 | Per-node overlay | Handled by `setup_rsyslog_overlay.yml` (called from `add_node` via `--tags manage_nodes`) |
+
+---
+
+## 13. Fixes Applied 2026-06-03
+
+### Fix 13 — pinode-01 `kubectl exec/logs` returning 502 (k3s tunnel broken for 187+ days)
+
+**Symptom:** `kubectl exec` and `kubectl logs` to any pod on pinode-01 returned `502 Bad Gateway` proxied from `127.0.0.1:6443`. DaemonSet pods (`svclb-traefik`, `svclb-pihole-dns`) had been stuck in `ContainerCreating` for 187 days.
+
+**Root causes and fixes (in order):**
+
+**13a — k3s registered pinode-01 with wlan0 IP (192.168.2.11)**  
+Without `node-ip` set, k3s agent auto-detected wlan0 as the primary interface. The API server then proxied kubelet calls to `192.168.2.11:10250`, which k8smaster cannot reach (WiFi AP isolation prevents direct Pi-to-Pi WiFi traffic on 192.168.2.x).  
+**Fix:** Added `node-ip: 192.168.1.11` to pinode-01's k3s config at `/srv/nfs/cluster/pinode-2793f1/etc/rancher/k3s/config.yaml`. Node now registers with its wired management IP.
+
+**13b — k3s tunnel WebSocket targeting 192.168.2.10:6443 (unreachable)**  
+k3s agents maintain a persistent WebSocket tunnel to the server (`/v1-k3s/connect`) used for `exec/logs`. The tunnel URL comes from the server's advertised address. Without `advertise-address`, k3s detected wlan0 (192.168.2.10) as primary and broadcast that. pinode-01 cached `192.168.2.10:6443` in `/var/lib/rancher/k3s/agent/etc/k3s-agent-load-balancer.json` and reconnected to it continuously — but 192.168.2.10 is also unreachable from pinode-01 (same AP isolation issue).  
+**Fix:** Created `/etc/rancher/k3s/config.yaml` on k8smaster with `advertise-address: 192.168.1.10` and `tls-san: 192.168.1.10`. Restarted k3s — it regenerated the server TLS cert with 192.168.1.10 as a SAN and began advertising the management NIC. The agent updated its load balancer JSON and the tunnel connected.
+
+**13c — Per-node /etc/resolv.conf overlay empty (no DNS on pinode-01)**  
+`/etc/resolv.conf` is in the per-node NFS overlay (`cluster/pinode-2793f1/etc/`), which contained only a `# Generated by NetworkManager` comment — masking the base rootfs version that has `nameserver 192.168.2.1`. With no nameservers, containerd couldn't resolve Docker Hub to pull images.  
+**Fix:** Wrote `nameserver 1.1.1.1` + `nameserver 8.8.8.8` to the per-node overlay resolv.conf. Note: pihole at `192.168.2.1` is unreachable from pinode-01 (same WiFi AP isolation), so upstream DNS is used directly.
+
+**13d — Containerd image store empty (pause image never imported)**  
+The containerd data directory lives in the per-node `/var` overlay (`cluster/pinode-2793f1/var/`). The k3s-agent had never successfully imported its bundled images — the images directory (`/var/lib/rancher/k3s/agent/images/`) was missing entirely. Without the pause image (`rancher/mirrored-pause:3.6`), containerd cannot create pod sandboxes, so every pod stays in `ContainerCreating`.  
+**Fix:** Pulled the image directly: `k3s ctr images pull docker.io/rancher/mirrored-pause:3.6`. All stuck DaemonSet pods transitioned to Running immediately.  
+**Ongoing:** New nodes will have the same empty containerd state on first boot. The pause image must be pre-pulled or pre-seeded. See §9.
+
+**Result:** `kubectl exec/logs` to pinode-01 pods working. DaemonSet pods Running. pihole DNS at `192.168.2.11:53` restored.
+
+### WiFi AP isolation — network topology note
+
+The home WiFi AP has client isolation enabled. Neither node can reach the other's WiFi IP (`192.168.2.10` ↔ `192.168.2.11`). All inter-node traffic that requires direct reachability (k3s tunnel, NFS, syslog) must use the wired management network (`192.168.1.x`). The cluster overlay network (flannel `10.42.x.x`) works because it tunnels through the k3s WebSocket, which now correctly uses the wired network.
+
+### Open item — pre-seed pause image for new nodes
+
+When a new worker node is onboarded, containerd starts empty. k3s will try to pull `rancher/mirrored-pause:3.6` on first pod scheduling. If DNS isn't working yet (see Fix 13c) this fails and pods stay in `ContainerCreating`.  
+**Workaround until automated:** after onboarding a new node, SSH in and run:
+```bash
+k3s ctr images pull docker.io/rancher/mirrored-pause:3.6
+```
+**Better fix:** pre-seed the image tarball into the node's `/var` overlay or bake it into the NFS base rootfs as a k3s images tarball in `/var/lib/rancher/k3s/agent/images/`.
