@@ -457,7 +457,7 @@ After the ConfigMap update triggered a rollout, the pod landed on pinode-01 whos
 **12d — pinode-01 /etc is a per-node NFS overlay**  
 pinode-01 mounts `cluster/pinode-2793f1/etc` over `/etc`, masking the base rootfs `/etc`. Writing `rsyslog.conf` and the forwarding config to the base rootfs had no effect.  
 **Fix:** Copied `rsyslog.conf` from the base rootfs and wrote the forwarding config directly into `/srv/nfs/cluster/pinode-2793f1/etc/`. Also created `/var/spool/rsyslog` in the node's `/var` overlay (same masking issue).  
-**Ongoing:** Any new worker node requires the same treatment — copy `rsyslog.conf` into its `cluster/<node>/etc/` overlay and create `var/spool/rsyslog`.
+**Ongoing:** Handled automatically — `roles/nfs_netboot/tasks/setup_rsyslog_overlay.yml` (called by `add_node` via `--tags manage_nodes`) copies `rsyslog.conf` and the forwarding config into each new node's overlay and creates `var/spool/rsyslog`.
 
 **12e — pinode-01 can only reach syslog-ng via management NIC**  
 Workers PXE-boot via `end0` (192.168.1.x) and have no route to `192.168.2.10` (wlan0/cluster network). The forwarding target must be `192.168.1.10:30514`.  
@@ -483,4 +483,4 @@ Without `externalTrafficPolicy: Local`, kube-proxy masquerades NodePort traffic 
 | Consolidated log | `/var/log/remote/all.log` |
 | Forwarding target (workers) | `192.168.1.10:30514` (management NIC — only NIC reachable from PXE nodes) |
 | rsyslog config in rootfs | `roles/prep_rootfs/tasks/configure_rsyslog.yml` — chroot-installs rsyslog + writes forwarding config |
-| Per-node overlay requirement | `rsyslog.conf` and `rsyslog.d/99-syslog-ng-forward.conf` must be in `cluster/<node>/etc/`; `spool/rsyslog` in `cluster/<node>/var/` |
+| Per-node overlay | Handled by `setup_rsyslog_overlay.yml` (called from `add_node` via `--tags manage_nodes`) |
