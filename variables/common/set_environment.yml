@@ -2,5 +2,5 @@
 cluster_name: pi-lab
 domain_name: i3sec.com.au
 timezone: Australia/Melbourne
-syslog_server_ip: "192.168.2.10"
+syslog_server_ip: "192.168.1.10"
 syslog_server_port: "30514"
