@@ -96,14 +96,7 @@ This:
 - Sets up TFTP directory structure for netboot
 - Installs rsyslog into the NFS rootfs (via chroot) and writes `/etc/rsyslog.d/99-syslog-ng-forward.conf` pointing at `192.168.1.10:30514`
 
-> **Note — per-node /etc overlay:** Each worker's `/etc` is a separate NFS overlay from `cluster/<node>/etc/`. After onboarding a new node, copy the rsyslog config into its overlay:
-> ```bash
-> NODE=pinode-<id>
-> sudo cp /srv/nfs/rpios/latest/etc/rsyslog.conf /srv/nfs/cluster/$NODE/etc/
-> sudo mkdir -p /srv/nfs/cluster/$NODE/etc/rsyslog.d /srv/nfs/cluster/$NODE/var/spool/rsyslog
-> sudo cp /srv/nfs/rpios/latest/etc/rsyslog.d/99-syslog-ng-forward.conf /srv/nfs/cluster/$NODE/etc/rsyslog.d/
-> ```
-> Without this, rsyslog starts but immediately exits (no `rsyslog.conf` found).
+> **Note — per-node /etc overlay:** Each worker's `/etc` is a separate NFS overlay from `cluster/<node>/etc/`, masking the base rootfs. The `add_node` task (`roles/nfs_netboot/tasks/setup_rsyslog_overlay.yml`) handles this automatically — it copies `rsyslog.conf` and the forwarding config into the node's overlay and creates `var/spool/rsyslog`. No manual steps needed for nodes onboarded via `--tags manage_nodes`.
 
 ---
 
