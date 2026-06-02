@@ -33,6 +33,18 @@ Currently `get.k3s.io` installs latest stable. Intentional for now. Revisit if a
 ### Feature: Cloudflare Tunnel
 Not currently deployed. Not found on host or in k8s workloads. No action needed until a use case is identified.
 
+### Feature: container log collection + metrics (observability stack)
+Current logging covers host OS only (rsyslog → syslog-ng). Container stdout/stderr and cluster metrics are not collected.
+- **Logs:** Fluent Bit DaemonSet reading `/var/log/containers/` → syslog-ng or Loki
+- **Metrics:** Prometheus + node-exporter DaemonSet + kube-state-metrics + Grafana
+- **Note:** sidecar approach was considered and rejected in favour of DaemonSet — covers all pods automatically without touching app manifests. Lightweight stack preferred given Pi hardware.
+
+### Chore: pre-seed pause image for new worker nodes
+On first boot, containerd is empty. k3s tries to pull `rancher/mirrored-pause:3.6` from Docker Hub when scheduling the first pod. If DNS isn't working yet the pull fails and pods stay in `ContainerCreating`.
+- **Workaround:** SSH to new node and run `k3s ctr images pull docker.io/rancher/mirrored-pause:3.6`
+- **Proper fix:** bake a k3s images tarball into the NFS base rootfs at `/var/lib/rancher/k3s/agent/images/` during `prep_rootfs`, or pre-pull in `add_node` via SSH after onboarding
+- **Details:** `docs/pi-1-inventory.md` §13
+
 ### Chore: verify kubeseal v0.27.1 matches sealed-secrets-controller version
 Before next rebuild, confirm `kubeseal` CLI version matches the `sealed-secrets-controller` image version running in `kube-system`. A mismatch causes `kubeseal` to produce secrets the controller can't decrypt.
 - **Check:** `kubectl get deployment sealed-secrets-controller -n kube-system -o jsonpath='{.spec.template.spec.containers[0].image}'`
