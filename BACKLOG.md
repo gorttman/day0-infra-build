@@ -13,7 +13,11 @@ _Nothing currently in flight._
 
 ## Todo
 
-_Nothing currently queued._
+### Bug (URGENT): worker nodes go offline after ~24 hours and cannot be SSH'd into
+After approximately 24 hours, PXE-booted worker nodes (pinode-01 etc.) become unreachable — no SSH, node may drop out of `kubectl get nodes`. Master is unaffected.
+- **Suspected causes:** DHCP lease expiry (default ISC DHCP lease is 24h — node may lose its IP or fail to renew), NFS root mount going stale/timing out (NFS hard mount with `timeo=600` could lock up on reconnect), or SSH host key rotation on the shared NFS rootfs conflicting with per-node overlay
+- **To investigate:** check DHCP lease time in dhcpd ConfigMap; check NFS mount options (`hard` vs `soft`, `intr`); check if node is still pingable when SSH fails; check k3s node status at the 24h mark; check `/var/log/remote/192.168.1.11/` syslog for what happens just before the node drops
+- **Note:** now that syslog forwarding is working, the logs at the moment of failure should be visible in syslog-ng — deliberately trigger by waiting or check tomorrow morning
 
 ---
 
