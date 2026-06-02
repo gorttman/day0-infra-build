@@ -7,7 +7,7 @@
 **Kernel:** 6.12.47+rpt-rpi-2712  
 **Arch:** arm64 (Pi 5)  
 **Audited:** 2026-05-31  
-**Last updated:** 2026-06-01 (rebuild gap audit — see §9, §10, §11)
+**Last updated:** 2026-06-02 (rsyslog forwarding — see §12)
 
 ---
 
@@ -147,7 +147,7 @@ The `dhcpd` deployment uses `hostNetwork: true` and binds to `end0` (Pi 5 predic
 | ingress-nginx | ingress-nginx-controller |
 | portainer | portainer |
 | kubernetes-dashboard | dashboard + metrics-scraper |
-| logging | syslog-ng (running), log-archiver CronJob (completing at 02:00 daily) |
+| logging | syslog-ng (1/1 Running, pinned to k8smaster, TCP NodePort 30514 / UDP 30515, `externalTrafficPolicy: Local`), log-archiver CronJob (completing at 02:00 daily) |
 | nfs-provisioner | nfs-client-provisioner |
 | pihole | pihole (healthy) — DNS at 192.168.2.10:53 / 192.168.2.11:53, web UI via traefik ingress |
 
@@ -186,6 +186,7 @@ Action: check `kubectl get all -A | grep cloudflare` to confirm.
 | `k3s.service` | enabled, running | Kubernetes server |
 | `docker.service` | enabled, running | Docker daemon (separate from containerd/k3s) |
 | `containerd.service` | enabled, running | containerd (k3s dependency) |
+| `rsyslog.service` | enabled, running | Syslog daemon — forwards to syslog-ng NodePort |
 | `nfs-server.service` | enabled, active(exited) | NFS kernel server |
 | `nfs-blkmap.service` | enabled, running | pNFS block layout |
 | `rpcbind.service` | enabled, running | Required for NFS |
@@ -230,6 +231,7 @@ Beyond standard Debian system packages:
 
 | Package | Purpose |
 |---------|---------|
+| `rsyslog` | Syslog daemon — forwards to central syslog-ng |
 | `ansible` | Automation (this repo) |
 | `docker.io` | Docker engine |
 | `nfs-kernel-server` | NFS server |
@@ -301,6 +303,7 @@ Files in `/etc` that are newer than `/etc/passwd` and not managed by dpkg/system
 | `/etc/hosts` | Added `127.0.1.1 k8smaster` | `lineinfile` |
 | `/etc/resolv.conf` | `search i3sec.com.au`, `nameserver 192.168.2.1` | Managed by NetworkManager — set via NM connection profile |
 | `/boot/firmware/cmdline.txt` | Added `cgroup_memory=1 cgroup_enable=memory cfg80211.ieee80211_regdom=AU` | `lineinfile` with backrefs |
+| `/etc/rsyslog.d/99-syslog-ng-forward.conf` | Forwards all logs to syslog-ng at `192.168.1.10:30514` (TCP) | Written directly by Ansible — see §12 |
 
 ### /etc/hosts (exact)
 ```
@@ -421,8 +424,63 @@ Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan`
 **Repo:** `day2-services` commit `c35363d`.
 
 ### Fix 11 — pihole liveness probe killing healthy container (hostNetwork vs traefik conflict)
+
 **Problem:** Even after scheduling, probes returned 404. With `hostNetwork: true`, both pihole (lighttpd) and traefik's svclb nginx compete for port 80 on the host. The kubelet's probe hit traefik (which had no route for `/admin/`) rather than pihole, killing the container every 60s via the liveness probe.  
 **Root cause verified:** `PIHOLE_WEB_PORT` is not a valid pihole env var — lighttpd ignores it. Additionally, Kubernetes auto-injects `PIHOLE_WEB_PORT=tcp://<clusterIP>:80` from the `pihole-web` service, overriding any configmap value.  
 **Fix:** Removed `hostNetwork: true` entirely. Pihole runs in its own network namespace. DNS (port 53) exposed via `LoadBalancer` service at `192.168.2.53` (served by traefik svclb on both nodes). Web UI served on port 80 via the existing `pihole-web` ClusterIP service and traefik ingress at `pihole.pilab.local`.  
 **Repo:** `day2-services` commit `aca07c9`.  
 **Result:** pihole `1/1 Running`, `Synced / Healthy`, zero restarts. DNS at `192.168.2.10:53` / `192.168.2.11:53`.
+
+---
+
+## 12. Fixes Applied 2026-06-02
+
+### Fix 12 — syslog-ng receiving no logs (rsyslog not installed, wrong TCP driver)
+
+**Problem:** syslog-ng pod was running for 174 days with zero messages received. No node was configured to forward syslog, and rsyslog was not installed in the NFS rootfs.
+
+**Root causes and fixes (in order):**
+
+**12a — rsyslog not in NFS rootfs**  
+The debootstrap-built rootfs had no syslog daemon. Chroot-installed rsyslog into the live rootfs at `/srv/nfs/rpios/latest/` and baked the install into `roles/prep_rootfs/tasks/configure_rsyslog.yml` for future rebuilds. On k8smaster, installed directly via apt.
+
+**12b — syslog-ng TCP driver mismatch**  
+The `syslog(transport("tcp"))` source driver expects RFC 6587 octet-counted framing. rsyslog's `omfwd` sends plain LF-terminated TCP syslog (RFC 3164). syslog-ng was closing every connection immediately.  
+**Fix:** Changed TCP source to `network(transport("tcp"))` in `syslog-server-configmap.yml`.  
+**Repo:** `day1-foundation` commit `2b19d5b`.
+
+**12c — syslog-ng pod rescheduled to pinode-01 (broken kubelet proxy)**  
+After the ConfigMap update triggered a rollout, the pod landed on pinode-01 whose kubelet API (port 10250) is unreachable via the API server proxy — making `kubectl exec` return 502.  
+**Fix:** Added `nodeSelector: kubernetes.io/hostname: k8smaster` to the Deployment.  
+**Repo:** `day1-foundation` commit `8e62dc0`.
+
+**12d — pinode-01 /etc is a per-node NFS overlay**  
+pinode-01 mounts `cluster/pinode-2793f1/etc` over `/etc`, masking the base rootfs `/etc`. Writing `rsyslog.conf` and the forwarding config to the base rootfs had no effect.  
+**Fix:** Copied `rsyslog.conf` from the base rootfs and wrote the forwarding config directly into `/srv/nfs/cluster/pinode-2793f1/etc/`. Also created `/var/spool/rsyslog` in the node's `/var` overlay (same masking issue).  
+**Ongoing:** Any new worker node requires the same treatment — copy `rsyslog.conf` into its `cluster/<node>/etc/` overlay and create `var/spool/rsyslog`.
+
+**12e — pinode-01 can only reach syslog-ng via management NIC**  
+Workers PXE-boot via `end0` (192.168.1.x) and have no route to `192.168.2.10` (wlan0/cluster network). The forwarding target must be `192.168.1.10:30514`.  
+**Fix:** Updated `syslog_server_ip` in `variables/common/set_environment.yml` to `192.168.1.10` and corrected the per-node overlay config.
+
+**12f — kube-proxy SNAT collapsing all source IPs to 10.42.0.1**  
+Without `externalTrafficPolicy: Local`, kube-proxy masquerades NodePort traffic to the local pod CIDR gateway — all nodes' logs landed in the same `10.42.0.1/` per-host directory.  
+**Fix:** Set `externalTrafficPolicy: Local` on the `syslog-ng-external` NodePort service. Works correctly because syslog-ng is pinned to k8smaster (pod is always local to the NodePort).  
+**Repo:** `day1-foundation` commit `0312660`.
+
+**Result:** Both k8smaster (`10.42.0.1/`) and pinode-01 (`192.168.1.11/`) forwarding to syslog-ng. Logs written to `/srv/nfs/syslog-store/logging-syslog-storage-pvc-.../` (10Gi NFS PVC), split by source IP into per-host daily files plus `all.log`.
+
+### syslog-ng architecture summary
+
+| Item | Value |
+|------|-------|
+| Pod | `logging/syslog-ng`, pinned to k8smaster |
+| TCP NodePort | 30514 (maps to container port 6514) |
+| UDP NodePort | 30515 (maps to container port 5514) |
+| `externalTrafficPolicy` | `Local` — source IPs preserved |
+| Log storage | `/srv/nfs/syslog-store/logging-syslog-storage-pvc-36707232-51d6-4600-91cb-d9782b50331d/` |
+| Per-host logs | `/var/log/remote/<source-IP>/<YYYY-MM-DD>.log` |
+| Consolidated log | `/var/log/remote/all.log` |
+| Forwarding target (workers) | `192.168.1.10:30514` (management NIC — only NIC reachable from PXE nodes) |
+| rsyslog config in rootfs | `roles/prep_rootfs/tasks/configure_rsyslog.yml` — chroot-installs rsyslog + writes forwarding config |
+| Per-node overlay requirement | `rsyslog.conf` and `rsyslog.d/99-syslog-ng-forward.conf` must be in `cluster/<node>/etc/`; `spool/rsyslog` in `cluster/<node>/var/` |

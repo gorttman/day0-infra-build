@@ -94,6 +94,16 @@ This:
 - Configures `/etc/exports` and `/etc/nfs.conf` (NFSv3 + NFSv4.2, manage-gids)
 - Copies the Pi OS golden image from the SD card into `/srv/nfs/rpios/latest`
 - Sets up TFTP directory structure for netboot
+- Installs rsyslog into the NFS rootfs (via chroot) and writes `/etc/rsyslog.d/99-syslog-ng-forward.conf` pointing at `192.168.1.10:30514`
+
+> **Note — per-node /etc overlay:** Each worker's `/etc` is a separate NFS overlay from `cluster/<node>/etc/`. After onboarding a new node, copy the rsyslog config into its overlay:
+> ```bash
+> NODE=pinode-<id>
+> sudo cp /srv/nfs/rpios/latest/etc/rsyslog.conf /srv/nfs/cluster/$NODE/etc/
+> sudo mkdir -p /srv/nfs/cluster/$NODE/etc/rsyslog.d /srv/nfs/cluster/$NODE/var/spool/rsyslog
+> sudo cp /srv/nfs/rpios/latest/etc/rsyslog.d/99-syslog-ng-forward.conf /srv/nfs/cluster/$NODE/etc/rsyslog.d/
+> ```
+> Without this, rsyslog starts but immediately exits (no `rsyslog.conf` found).
 
 ---
 
@@ -172,6 +182,12 @@ kubectl get pods -A | grep -v "Running\|Completed"
 
 # dhcpd serving backend VLAN
 kubectl logs -n infra deployment/dhcpd | grep Listening
+
+# syslog-ng receiving logs from k8smaster (should be > 0)
+kubectl exec -n logging deployment/syslog-ng -- syslog-ng-ctl stats | grep "s_network_tcp.*processed"
+
+# per-host log dirs (one per forwarding node)
+ls /srv/nfs/syslog-store/logging-syslog-storage-pvc-*/
 ```
 
 ---
@@ -195,4 +211,6 @@ kubectl logs -n infra deployment/dhcpd | grep Listening
 - [ ] pinode-01 joins cluster
 - [ ] pihole resolving DNS
 - [ ] log-archiver CronJob completes at 02:00
+- [ ] syslog-ng receiving logs (`syslog-ng-ctl stats` shows TCP processed > 0)
+- [ ] Per-node log dirs present in `/srv/nfs/syslog-store/.../`
 - [ ] ArgoCD UI accessible at https://192.168.2.10:30443
