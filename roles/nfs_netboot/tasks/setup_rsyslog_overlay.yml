@@ -1,0 +1,53 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_rsyslog_overlay.yml
+################################################################################
+---
+# Write rsyslog config into each node's /etc overlay and ensure the spool dir
+# exists in /var. The /etc and /var overlays mask the base NFS rootfs, so files
+# written there at rootfs build time are invisible until explicitly copied here.
+
+- name: Ensure rsyslog.d directory exists in node etc overlay
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/rsyslog.d"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/rsyslog.d"
+
+- name: Copy rsyslog.conf from base rootfs into node etc overlay
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/etc/rsyslog.conf"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/rsyslog.conf"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/rsyslog.conf"
+
+- name: Copy rsyslog forwarding config into node etc overlay
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/etc/rsyslog.d/99-syslog-ng-forward.conf"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/rsyslog.d/99-syslog-ng-forward.conf"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/rsyslog.d/99-syslog-ng-forward.conf"
+
+- name: Ensure rsyslog spool directory exists in node var overlay
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/var/spool/rsyslog"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/var/spool/rsyslog"
+
+- name: Enable rsyslog.service symlink in node etc overlay
+  ansible.builtin.file:
+    src: "/lib/systemd/system/rsyslog.service"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/systemd/system/multi-user.target.wants/rsyslog.service"
+    state: link
+    force: true
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/systemd/system/multi-user.target.wants/rsyslog.service"

@@ -15,6 +15,11 @@
   vars:
     nodes: "{{ new_nodes }}"
 
+- name: Set up rsyslog overlay for new nodes
+  ansible.builtin.include_tasks: setup_rsyslog_overlay.yml
+  vars:
+    nodes: "{{ new_nodes }}"
+
 - name: Set up TFTP boot structure for new nodes
   ansible.builtin.include_tasks: setup_tftp_structure.yml
   vars:
