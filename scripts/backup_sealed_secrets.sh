@@ -11,14 +11,14 @@ mkdir -p "$BACKUP_DIR"
 TIMESTAMP=$(date +%F-%H%M%S)
 OUTPUT_FILE="$BACKUP_DIR/sealed-secrets-key-$TIMESTAMP.yaml"
 
-# Check if the key exists in the cluster
-if ! kubectl get secret sealed-secrets-key -n kube-system >/dev/null 2>&1; then
+# Check if any sealed secrets keys exist in the cluster
+if ! kubectl get secrets -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key >/dev/null 2>&1; then
   echo "[*] sealed-secrets-key not found yet, will check again later."
   exit 0
 fi
 
-# Export the key
-kubectl get secret sealed-secrets-key -n kube-system -o yaml > "$OUTPUT_FILE"
+# Export all keys
+kubectl get secrets -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > "$OUTPUT_FILE"
 echo "[*] Backed up Sealed Secrets key to $OUTPUT_FILE"
 
 # Update cronjob to weekly
