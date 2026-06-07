@@ -47,16 +47,6 @@
       nameserver 1.1.1.1
       nameserver 8.8.8.8
 
-- name: Write minimal fstab placeholder
-  ansible.builtin.copy:
-    dest: "{{ staging_rootfs }}/etc/fstab"
-    mode: "0644"
-    content: |
-      proc            /proc           proc    defaults          0       0
-      sysfs           /sys            sysfs   defaults          0       0
-      tmpfs           /tmp            tmpfs   defaults          0       0
-      devpts          /dev/pts        devpts  gid=5,mode=620    0       0
-
 - name: Copy qemu-user-static binary into rootfs for chroot compatibility
   ansible.builtin.command:
     cmd: cp /usr/bin/qemu-aarch64-static {{ staging_rootfs }}/usr/bin/
