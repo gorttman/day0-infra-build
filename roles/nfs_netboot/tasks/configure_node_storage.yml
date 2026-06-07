@@ -32,46 +32,13 @@
   register: cluster_populated
   loop: "{{ nodes }}"
 
-- name: Copy initial etc content to node cluster storage
+- name: Copy initial content to node cluster storage
   ansible.posix.synchronize:
-    src: "{{ nfs_os_path }}/etc/"
-    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/etc/"
+    src: "{{ nfs_os_path }}/{{ item.1 }}/"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.0.item.mac_suffix }}/{{ item.1 }}/"
     archive: true
-  loop: "{{ cluster_populated.results }}"
-  when: not item.stat.exists
+  loop: "{{ cluster_populated.results | product(['etc', 'var', 'home', 'root']) | list }}"
+  when: not item.0.stat.exists
   delegate_to: "{{ inventory_hostname }}"
   loop_control:
-    label: "pinode-{{ item.item.mac_suffix }}/etc"
-
-- name: Copy initial var content to node cluster storage
-  ansible.posix.synchronize:
-    src: "{{ nfs_os_path }}/var/"
-    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/var/"
-    archive: true
-  loop: "{{ cluster_populated.results }}"
-  when: not item.stat.exists
-  delegate_to: "{{ inventory_hostname }}"
-  loop_control:
-    label: "pinode-{{ item.item.mac_suffix }}/var"
-
-- name: Copy initial home content to node cluster storage
-  ansible.posix.synchronize:
-    src: "{{ nfs_os_path }}/home/"
-    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/home/"
-    archive: true
-  loop: "{{ cluster_populated.results }}"
-  when: not item.stat.exists
-  delegate_to: "{{ inventory_hostname }}"
-  loop_control:
-    label: "pinode-{{ item.item.mac_suffix }}/home"
-
-- name: Copy initial root content to node cluster storage
-  ansible.posix.synchronize:
-    src: "{{ nfs_os_path }}/root/"
-    dest: "{{ nfs_cluster_path }}/pinode-{{ item.item.mac_suffix }}/root/"
-    archive: true
-  loop: "{{ cluster_populated.results }}"
-  when: not item.stat.exists
-  delegate_to: "{{ inventory_hostname }}"
-  loop_control:
-    label: "pinode-{{ item.item.mac_suffix }}/root"
+    label: "pinode-{{ item.0.item.mac_suffix }}/{{ item.1 }}"
