@@ -1,12 +1,18 @@
 ---
-- name: Relax permissions on kubeconfig so Ansible can read it
-  file:
-    path: /etc/rancher/k3s/k3s.yaml
-    owner: root
-    group: root
-    mode: '0744'
+- name: Configure k3s to write kubeconfig with relaxed permissions
+  ansible.builtin.lineinfile:
+    path: /etc/rancher/k3s/config.yaml
+    regexp: '^write-kubeconfig-mode:'
+    line: 'write-kubeconfig-mode: "0644"'
+    create: true
+    mode: '0600'
   become: true
-  become_user: root
+
+- name: Restart k3s to apply kubeconfig mode config
+  ansible.builtin.service:
+    name: k3s
+    state: restarted
+  become: true
 
 - name: Extract kubeseal binary
   unarchive:
