@@ -470,7 +470,8 @@ Two connection profiles active: WiFi (unnamed, DHCP on wlan0) and `backend-vlan`
 
 **12a — rsyslog not in NFS rootfs**  
 The debootstrap-built rootfs had no syslog daemon. Chroot-installed rsyslog into the live rootfs at `/srv/nfs/rpios/latest/` directly (manual fix, not automated at the time). On k8smaster, installed directly via apt.  
-**Correction (2026-07-01):** this fix was originally recorded as "baked into `roles/prep_rootfs/tasks/configure_rsyslog.yml` for future rebuilds," but that role built to an orphaned staging path never synced to the live `nfs_os_path` (`/srv/nfs/rpios/latest`) — see `docs/rebuild-gap-audit.md` item 4. That role has since been deleted as dead code. **Installing rsyslog into the real base rootfs is not currently automated anywhere** — `setup_rsyslog_overlay.yml` only writes per-node config, assuming rsyslog is already present on the golden SD card image. Tracked as a follow-up in `docs/rebuild-gap-audit.md`.
+**Correction (2026-07-01):** this fix was originally recorded as "baked into `roles/prep_rootfs/tasks/configure_rsyslog.yml` for future rebuilds," but that role built to an orphaned staging path never synced to the live `nfs_os_path` (`/srv/nfs/rpios/latest`) — see `docs/rebuild-gap-audit.md` item 4. That role has since been deleted as dead code.  
+**Now automated:** `roles/nfs_netboot/tasks/install_rsyslog_base.yml`, called from `configure_nfs_root_common.yml` during `--tags manage_nfs`, chroot-installs rsyslog and writes the forwarding config directly into `nfs_os_path` — see `docs/rebuild-gap-audit.md` item 4 follow-up.
 
 **12b — syslog-ng TCP driver mismatch**  
 The `syslog(transport("tcp"))` source driver expects RFC 6587 octet-counted framing. rsyslog's `omfwd` sends plain LF-terminated TCP syslog (RFC 3164). syslog-ng was closing every connection immediately.  
@@ -510,7 +511,7 @@ Without `externalTrafficPolicy: Local`, kube-proxy masquerades NodePort traffic 
 | Per-host logs | `/var/log/remote/<source-IP>/<YYYY-MM-DD>.log` |
 | Consolidated log | `/var/log/remote/all.log` |
 | Forwarding target (workers) | `192.168.1.10:30514` (management NIC — only NIC reachable from PXE nodes) |
-| rsyslog config in rootfs | Not currently automated — installed manually on the live rootfs; see 12a correction above and `docs/rebuild-gap-audit.md` item 4 |
+| rsyslog config in rootfs | `roles/nfs_netboot/tasks/install_rsyslog_base.yml` — chroot-installs rsyslog + writes forwarding config into the base rootfs (see 12a correction above) |
 | Per-node overlay | Handled by `setup_rsyslog_overlay.yml` (called from `add_node` via `--tags manage_nodes`) |
 
 ---

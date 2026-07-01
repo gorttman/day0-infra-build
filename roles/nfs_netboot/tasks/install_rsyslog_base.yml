@@ -1,0 +1,42 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/install_rsyslog_base.yml
+################################################################################
+---
+# Install rsyslog + the syslog-ng forwarding config into the base rootfs
+# (once, when the golden image is imported/updated). Not enabled here — the
+# systemd enablement symlink lands in /etc, which is masked by each worker's
+# per-node /etc overlay, and is recreated there instead by
+# setup_rsyslog_overlay.yml (which also copies rsyslog.conf and this
+# forwarding config out of the base rootfs into each new node's overlay).
+# See docs/rebuild-gap-audit.md item 4 follow-up.
+
+- name: Install rsyslog into base rootfs via chroot
+  ansible.builtin.shell: |
+    set -e
+    trap 'umount {{ nfs_os_path }}/dev {{ nfs_os_path }}/sys {{ nfs_os_path }}/proc 2>/dev/null || true' EXIT
+    mount --bind /proc {{ nfs_os_path }}/proc
+    mount --bind /sys  {{ nfs_os_path }}/sys
+    mount --bind /dev  {{ nfs_os_path }}/dev
+    chroot {{ nfs_os_path }} apt-get update -q
+    DEBIAN_FRONTEND=noninteractive chroot {{ nfs_os_path }} apt-get install -y rsyslog
+  become: true
+  args:
+    creates: "{{ nfs_os_path }}/usr/sbin/rsyslogd"
+
+- name: Ensure rsyslog.d directory exists in base rootfs
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/etc/rsyslog.d"
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Write rsyslog forwarding config into base rootfs
+  ansible.builtin.copy:
+    dest: "{{ nfs_os_path }}/etc/rsyslog.d/99-syslog-ng-forward.conf"
+    mode: "0644"
+    content: |
+      # Forward all logs to central syslog-ng
+      *.* action(type="omfwd" target="{{ syslog_server_ip }}" port="{{ syslog_server_port }}" protocol="tcp"
+               action.resumeRetryCount="100"
+               queue.type="linkedList" queue.size="10000")
+  become: true

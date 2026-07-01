@@ -119,16 +119,29 @@ confirmed dead, no cutover attempted. Path A remains the one documented pipeline
 still dependent on the physical golden SD card (see item 7, and the still-open
 "no build step for the OS content itself" observation below).
 
-**New gap surfaced by this deletion:** installing rsyslog into the *real* base
-rootfs (`nfs_os_path`) is not automated anywhere now — it never was in Path A,
-and the (non-functional) attempt to automate it lived only in the now-deleted
-Path B. `setup_rsyslog_overlay.yml` only writes per-node config; it assumes
-rsyslog is already present in the base image. A true from-scratch rebuild (fresh
-golden SD card with no rsyslog pre-installed) would silently lose syslog
-forwarding until someone repeats Fix 12a by hand again. Same pattern as the k3s
-agent fix in item 3 — recommend a `roles/nfs_netboot/tasks/install_rsyslog_base.yml`
-chroot-install task wired into `configure_nfs_root_common.yml`, mirroring
-`install_k3s_agent_base.yml`. Not done yet — flagging for a follow-up pass.
+**New gap surfaced by this deletion — RESOLVED 2026-07-01:** installing rsyslog
+into the *real* base rootfs (`nfs_os_path`) was not automated anywhere — it
+never was in Path A, and the (non-functional) attempt to automate it lived
+only in the now-deleted Path B. `setup_rsyslog_overlay.yml` only writes
+per-node config; it assumes rsyslog is already present in the base image. A
+true from-scratch rebuild (fresh golden SD card with no rsyslog pre-installed)
+would have silently lost syslog forwarding until someone repeated Fix 12a by
+hand again.
+
+**Fix:** new task `roles/nfs_netboot/tasks/install_rsyslog_base.yml`
+(mirroring `install_k3s_agent_base.yml`'s pattern), wired into
+`configure_nfs_root_common.yml`. Chroot-installs the `rsyslog` package into
+`nfs_os_path` and writes `etc/rsyslog.d/99-syslog-ng-forward.conf` there (using
+the existing `syslog_server_ip`/`syslog_server_port` vars), so both files
+`setup_rsyslog_overlay.yml` already copies out of the base rootfs
+(`etc/rsyslog.conf` and the forwarding config) actually exist on a freshly
+imported golden image. Not enabled in the base rootfs itself — same masking
+reasoning as the k3s agent unit; enablement stays owned by
+`setup_rsyslog_overlay.yml` per node.
+
+**Caveat — not yet verified end-to-end**, same as item 3: no spare golden SD
+card/node in this session to test a real `manage_nfs` + `manage_nodes` run
+against it.
 
 **Still open, not addressed by this deletion:** neither Path A nor the deleted
 Path B ever provided an actual *build* step for the OS/kernel/initramfs content

@@ -20,3 +20,6 @@
 
 - name: Install k3s agent into base rootfs
   ansible.builtin.include_tasks: install_k3s_agent_base.yml
+
+- name: Install rsyslog into base rootfs
+  ansible.builtin.include_tasks: install_rsyslog_base.yml
