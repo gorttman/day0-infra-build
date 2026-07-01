@@ -1,6 +1,0 @@
-# FILE: roles/publish-nfs-os/tasks/main.yml
----
-# Publish the prepared rootfs into the NFS export.
-
-- name: Export rootfs to NFS
-  import_tasks: to_nfs.yml

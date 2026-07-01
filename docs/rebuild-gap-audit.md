@@ -88,7 +88,7 @@ duplicate or conflict with.
 
 ## Medium
 
-### 4. Two contradictory, undocumented netboot-rootfs pipelines coexist
+### 4. Two contradictory, undocumented netboot-rootfs pipelines coexist — RESOLVED 2026-07-01
 - **Path A (used):** `nfs_netboot` role → SD-card golden-image import into
   `nfs_os_path` (`/srv/nfs/rpios/latest`, per `variables/play/day0_nfs_prep.yml`
   and `day1_node_prep.yml`). This is the path actually exported via NFS, referenced
@@ -106,18 +106,35 @@ duplicate or conflict with.
 references `/srv/nfs/base` anywhere else in either repo. Path B's output has
 never actually reached a booting node.
 
-This makes Fix 12a's claim in `pi-1-inventory.md` (rsyslog install "baked into
+This made Fix 12a's claim in `pi-1-inventory.md` (rsyslog install "baked into
 `roles/prep_rootfs/tasks/configure_rsyslog.yml` for future rebuilds") misleading
-— that task chroot-installs rsyslog into Path B's `staging_rootfs`, which is
+— that task chroot-installed rsyslog into Path B's `staging_rootfs`, which was
 never synced to the live `nfs_os_path`. The rsyslog fix that's actually live
 today only got there because it was *also* applied by hand directly to
-`/srv/nfs/rpios/latest` at the time. **A future rebuild relying on Path B for
-rsyslog would not get it.**
+`/srv/nfs/rpios/latest` at the time.
 
-Confusing dead/parallel code for anyone doing a rebuild under pressure — unclear
-which is authoritative, and neither is complete on its own. Not fixed as part of
-this pass — recommend either deleting Path B entirely or repointing
-`publish_nfs_os` at `nfs_os_path` and making it the one true pipeline.
+**Fix:** deleted `day1-prep-netboot.yml`, `roles/prep_rootfs/`, `roles/prep_kernel/`,
+`roles/publish_nfs_os/`, and `variables/play/day1_prep_netboot.yml` outright —
+confirmed dead, no cutover attempted. Path A remains the one documented pipeline,
+still dependent on the physical golden SD card (see item 7, and the still-open
+"no build step for the OS content itself" observation below).
+
+**New gap surfaced by this deletion:** installing rsyslog into the *real* base
+rootfs (`nfs_os_path`) is not automated anywhere now — it never was in Path A,
+and the (non-functional) attempt to automate it lived only in the now-deleted
+Path B. `setup_rsyslog_overlay.yml` only writes per-node config; it assumes
+rsyslog is already present in the base image. A true from-scratch rebuild (fresh
+golden SD card with no rsyslog pre-installed) would silently lose syslog
+forwarding until someone repeats Fix 12a by hand again. Same pattern as the k3s
+agent fix in item 3 — recommend a `roles/nfs_netboot/tasks/install_rsyslog_base.yml`
+chroot-install task wired into `configure_nfs_root_common.yml`, mirroring
+`install_k3s_agent_base.yml`. Not done yet — flagging for a follow-up pass.
+
+**Still open, not addressed by this deletion:** neither Path A nor the deleted
+Path B ever provided an actual *build* step for the OS/kernel/initramfs content
+— Path A only imports a pre-existing physical SD card image verbatim. Removing
+Path B doesn't add or remove that capability; it only removes confusing dead
+code that was never providing it in the first place.
 
 ### 5. Pause-image pre-seed gap (already tracked)
 New worker nodes have an empty containerd image store. First pod scheduled tries
