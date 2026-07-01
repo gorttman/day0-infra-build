@@ -1,0 +1,28 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/install_k3s_agent_base.yml
+################################################################################
+---
+# Install the k3s agent binary + systemd unit into the base rootfs (once,
+# when the golden image is imported/updated). Installed with skip-enable and
+# skip-start since there's no token/server known yet at base-image build
+# time, and no running init inside the chroot to start it against anyway.
+#
+# The unit file and any enablement symlink land in the base rootfs's /etc,
+# which is masked by each worker's per-node /etc overlay (same issue as
+# rsyslog.conf — see setup_rsyslog_overlay.yml). setup_k3s_agent_overlay.yml
+# (called from add_node) copies the unit into each node's overlay, writes
+# its join config, and enables it there.
+
+- name: Install curl and k3s agent binary/unit into base rootfs via chroot
+  ansible.builtin.shell: |
+    set -e
+    trap 'umount {{ nfs_os_path }}/dev {{ nfs_os_path }}/sys {{ nfs_os_path }}/proc 2>/dev/null || true' EXIT
+    mount --bind /proc {{ nfs_os_path }}/proc
+    mount --bind /sys  {{ nfs_os_path }}/sys
+    mount --bind /dev  {{ nfs_os_path }}/dev
+    chroot {{ nfs_os_path }} apt-get update -q
+    DEBIAN_FRONTEND=noninteractive chroot {{ nfs_os_path }} apt-get install -y curl
+    chroot {{ nfs_os_path }} sh -c 'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_ENABLE=true INSTALL_K3S_SKIP_START=true sh -s - agent'
+  become: true
+  args:
+    creates: "{{ nfs_os_path }}/usr/local/bin/k3s"

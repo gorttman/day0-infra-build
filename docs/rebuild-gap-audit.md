@@ -56,7 +56,7 @@ backup ever stops running.
 
 ## High
 
-### 3. Worker k3s agent join isn't automated anywhere
+### 3. Worker k3s agent join isn't automated anywhere — RESOLVED 2026-07-01
 No task in the repo writes a worker's `/etc/rancher/k3s/config.yaml`
 (`server:`, `token:`, `node-ip:`) or installs the k3s agent binary. The path
 actually wired into the runbook (`nfs_netboot` role, tag `manage_nfs`) just clones
@@ -66,21 +66,58 @@ a **physically inserted, pre-built "golden image" SD card**
 If that SD card is lost, corrupted, or goes stale, there is no scripted way to
 reproduce it.
 
+**Fix:** two new tasks. `install_k3s_agent_base.yml` (called from
+`configure_nfs_root_common.yml`, part of the `manage_nfs` flow) chroot-installs
+the k3s agent binary + `k3s-agent.service` into the base rootfs with
+skip-enable/skip-start (no token known yet at that point). `setup_k3s_agent_overlay.yml`
+(called from `add_node`, part of `manage_nodes`) writes the actual join config
+(`server: https://192.168.1.10:6443`, the live `node-token` read off k8smaster,
+and `node-ip`) plus the enablement symlink into each new node's `/etc` overlay
+— the same masking pattern `setup_rsyslog_overlay.yml` already handles for rsyslog.
+
+**Caveat — not yet verified end-to-end.** This was written and syntax-checked
+but not run against a real onboarding (no spare Pi/SD card in this session).
+Before trusting it for the next real worker onboard: confirm `get.k3s.io`'s
+`agent` positional argument + `INSTALL_K3S_SKIP_ENABLE`/`INSTALL_K3S_SKIP_START`
+behave as expected inside the chroot (network access from chroot may need
+checking), and confirm the existing golden-image-imported base rootfs doesn't
+already have a k3s agent installed some other way that this would now
+duplicate or conflict with.
+
 ---
 
 ## Medium
 
 ### 4. Two contradictory, undocumented netboot-rootfs pipelines coexist
-- **Path A (used):** `nfs_netboot` role → SD-card golden-image import. This is
-  what `rebuild-runbook.md` Step 4 documents.
+- **Path A (used):** `nfs_netboot` role → SD-card golden-image import into
+  `nfs_os_path` (`/srv/nfs/rpios/latest`, per `variables/play/day0_nfs_prep.yml`
+  and `day1_node_prep.yml`). This is the path actually exported via NFS, referenced
+  by the PXE `nfsroot=` kernel param, and what `rebuild-runbook.md` Step 4 documents.
 - **Path B (orphaned):** `day1-prep-netboot.yml` → `prep_rootfs` (debootstrap) +
   `prep_kernel` (from-scratch kernel build) + `publish_nfs_os`. Added early in
   git history (`55d24f5 Added nfs boot & root fs build`), never referenced by
   `README.md` or `rebuild-runbook.md`, and doesn't solve gap #3 either (no k3s
   agent config written there either).
 
+**Confirmed genuinely dead, not just undocumented:** Path B's own variables
+(`variables/play/day1_prep_netboot.yml`) set `nfs_export_path: /srv/nfs`, and
+`publish_nfs_os/tasks/to_nfs.yml` rsyncs the built rootfs to
+`{{ nfs_export_path }}/base` — i.e. `/srv/nfs/base`. Nothing exports, mounts, or
+references `/srv/nfs/base` anywhere else in either repo. Path B's output has
+never actually reached a booting node.
+
+This makes Fix 12a's claim in `pi-1-inventory.md` (rsyslog install "baked into
+`roles/prep_rootfs/tasks/configure_rsyslog.yml` for future rebuilds") misleading
+— that task chroot-installs rsyslog into Path B's `staging_rootfs`, which is
+never synced to the live `nfs_os_path`. The rsyslog fix that's actually live
+today only got there because it was *also* applied by hand directly to
+`/srv/nfs/rpios/latest` at the time. **A future rebuild relying on Path B for
+rsyslog would not get it.**
+
 Confusing dead/parallel code for anyone doing a rebuild under pressure — unclear
-which is authoritative, and neither is complete on its own.
+which is authoritative, and neither is complete on its own. Not fixed as part of
+this pass — recommend either deleting Path B entirely or repointing
+`publish_nfs_os` at `nfs_os_path` and making it the one true pipeline.
 
 ### 5. Pause-image pre-seed gap (already tracked)
 New worker nodes have an empty containerd image store. First pod scheduled tries

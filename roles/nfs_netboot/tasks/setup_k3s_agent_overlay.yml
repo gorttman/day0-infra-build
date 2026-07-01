@@ -1,0 +1,63 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_k3s_agent_overlay.yml
+################################################################################
+---
+# Write the k3s agent join config and enable the k3s-agent service in each
+# new node's /etc overlay. The k3s-agent.service unit installed into the base
+# rootfs by install_k3s_agent_base.yml is masked by the per-node /etc overlay,
+# so it's copied in here alongside the enablement symlink — same pattern as
+# setup_rsyslog_overlay.yml. See docs/rebuild-gap-audit.md item 3.
+
+- name: Read k3s server join token
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_node_token_raw
+
+- name: Ensure rancher/k3s directory exists in node etc overlay
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/rancher/k3s"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/rancher/k3s"
+
+- name: Write k3s agent join config into node etc overlay
+  ansible.builtin.copy:
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/rancher/k3s/config.yaml"
+    mode: '0600'
+    content: |
+      server: https://{{ backend_vlan_ip }}:6443
+      token: {{ k3s_node_token_raw.content | b64decode | trim }}
+      node-ip: {{ item.ip }}
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/rancher/k3s/config.yaml"
+
+- name: Ensure multi-user.target.wants directory exists in node etc overlay
+  ansible.builtin.file:
+    path: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/systemd/system/multi-user.target.wants"
+    state: directory
+    mode: '0755'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/systemd/system/multi-user.target.wants"
+
+- name: Copy k3s-agent.service unit from base rootfs into node etc overlay
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/etc/systemd/system/k3s-agent.service"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/systemd/system/k3s-agent.service"
+    mode: '0644'
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/systemd/system/k3s-agent.service"
+
+- name: Enable k3s-agent.service in node etc overlay
+  ansible.builtin.file:
+    src: "/etc/systemd/system/k3s-agent.service"
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/systemd/system/multi-user.target.wants/k3s-agent.service"
+    state: link
+    force: true
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/systemd/system/multi-user.target.wants/k3s-agent.service"

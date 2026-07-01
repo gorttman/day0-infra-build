@@ -17,3 +17,6 @@
 
 - name: Include enable service in chroot tasks
   ansible.builtin.include_tasks: enable_service_in_chroot.yml
+
+- name: Install k3s agent into base rootfs
+  ansible.builtin.include_tasks: install_k3s_agent_base.yml

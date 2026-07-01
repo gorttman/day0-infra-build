@@ -20,6 +20,11 @@
   vars:
     nodes: "{{ new_nodes }}"
 
+- name: Set up k3s agent join config for new nodes
+  ansible.builtin.include_tasks: setup_k3s_agent_overlay.yml
+  vars:
+    nodes: "{{ new_nodes }}"
+
 - name: Set up TFTP boot structure for new nodes
   ansible.builtin.include_tasks: setup_tftp_structure.yml
   vars:

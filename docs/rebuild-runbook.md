@@ -97,8 +97,9 @@ This:
 - Copies the Pi OS golden image from the SD card into `/srv/nfs/rpios/latest`
 - Sets up TFTP directory structure for netboot
 - Installs rsyslog into the NFS rootfs (via chroot) and writes `/etc/rsyslog.d/99-syslog-ng-forward.conf` pointing at `192.168.1.10:30514`
+- Installs the k3s agent binary + `k3s-agent.service` into the NFS rootfs (via chroot, skip-enable/skip-start — no join token known yet at this point)
 
-> **Note — per-node /etc overlay:** Each worker's `/etc` is a separate NFS overlay from `cluster/<node>/etc/`, masking the base rootfs. The `add_node` task (`roles/nfs_netboot/tasks/setup_rsyslog_overlay.yml`) handles this automatically — it copies `rsyslog.conf` and the forwarding config into the node's overlay and creates `var/spool/rsyslog`. No manual steps needed for nodes onboarded via `--tags manage_nodes`.
+> **Note — per-node /etc overlay:** Each worker's `/etc` is a separate NFS overlay from `cluster/<node>/etc/`, masking the base rootfs. The `add_node` task handles this automatically for both rsyslog (`roles/nfs_netboot/tasks/setup_rsyslog_overlay.yml` — copies `rsyslog.conf` and the forwarding config into the node's overlay, creates `var/spool/rsyslog`) and the k3s agent join (`roles/nfs_netboot/tasks/setup_k3s_agent_overlay.yml` — writes `/etc/rancher/k3s/config.yaml` with the server URL, join token, and `node-ip`, copies in the `k3s-agent.service` unit, and enables it). No manual steps needed for nodes onboarded via `--tags manage_nodes`.
 
 ---
 

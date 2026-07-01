@@ -524,7 +524,8 @@ Without `externalTrafficPolicy: Local`, kube-proxy masquerades NodePort traffic 
 
 **13a — k3s registered pinode-01 with wlan0 IP (192.168.2.11)**  
 Without `node-ip` set, k3s agent auto-detected wlan0 as the primary interface. The API server then proxied kubelet calls to `192.168.2.11:10250`, which k8smaster cannot reach (WiFi AP isolation prevents direct Pi-to-Pi WiFi traffic on 192.168.2.x).  
-**Fix:** Added `node-ip: 192.168.1.11` to pinode-01's k3s config at `/srv/nfs/cluster/pinode-2793f1/etc/rancher/k3s/config.yaml`. Node now registers with its wired management IP.
+**Fix:** Added `node-ip: 192.168.1.11` to pinode-01's k3s config at `/srv/nfs/cluster/pinode-2793f1/etc/rancher/k3s/config.yaml`. Node now registers with its wired management IP.  
+**Now automated:** the entire per-node `config.yaml` (`server`, `token`, `node-ip`) is written by `roles/nfs_netboot/tasks/setup_k3s_agent_overlay.yml`, called from `add_node` during `--tags manage_nodes` — see `docs/rebuild-gap-audit.md` item 3. Previously nothing installed or joined the k3s agent on new nodes at all; this also closes that gap.
 
 **13b — k3s tunnel WebSocket targeting 192.168.2.10:6443 (unreachable)**  
 k3s agents maintain a persistent WebSocket tunnel to the server (`/v1-k3s/connect`) used for `exec/logs`. The tunnel URL comes from the server's advertised address. Without `advertise-address`, k3s detected wlan0 (192.168.2.10) as primary and broadcast that. pinode-01 cached `192.168.2.10:6443` in `/var/lib/rancher/k3s/agent/etc/k3s-agent-load-balancer.json` and reconnected to it continuously — but 192.168.2.10 is also unreachable from pinode-01 (same AP isolation issue).  
