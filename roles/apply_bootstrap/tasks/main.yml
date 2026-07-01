@@ -10,6 +10,10 @@
    ansible.builtin.include_tasks:
     file: manage_repo_secrets.yml
 
+ - name: Restore sealed-secrets controller key backup (if any) before ArgoCD deploys a fresh controller
+   ansible.builtin.include_tasks:
+    file: restore_sealed_secrets_key.yml
+
  - name: Apply ArgoCD bootstrap
    include_tasks: apply_bootstrap.yml
 

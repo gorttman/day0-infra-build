@@ -12,7 +12,7 @@ Findings below are ranked by how badly they'd bite during an actual rebuild.
 
 ## Critical — would silently break a rebuild
 
-### 1. Master's k3s `advertise-address` / `tls-san` fix isn't in code
+### 1. Master's k3s `advertise-address` / `tls-san` fix isn't in code — RESOLVED 2026-07-01
 `pi-1-inventory.md` §13b documents a 187-day-long broken `kubectl exec/logs` bug
 (502 from the k3s tunnel), fixed live by writing to `/etc/rancher/k3s/config.yaml`:
 ```yaml
@@ -24,7 +24,10 @@ But `roles/install_required_software/tasks/post_install.yml` only ever writes
 `write-kubeconfig-mode: "0644"` to that file — the advertise-address/tls-san lines
 were never backported. **A rebuild from code today reproduces the exact same bug.**
 
-### 2. Sealed-secrets private key has no restore path
+**Fix:** `post_install.yml` now writes both values via `backend_vlan_ip` before
+restarting k3s.
+
+### 2. Sealed-secrets private key has no restore path — RESOLVED 2026-07-01
 Two separate mechanisms *back up* the sealed-secrets-controller key:
 - `scripts/backup_sealed_secrets.sh` (host cron, every 5 min → weekly) →
   `day0-infra-build/credentials/sealed-secrets-key-*.yaml`
@@ -38,6 +41,16 @@ Nothing anywhere **restores** either backup. ArgoCD deploys the official
 permanently undecryptable unless someone manually re-applies the old key secret
 *before* the fresh controller generates its own. Not mentioned in
 `rebuild-runbook.md` at all.
+
+**Fix:** new task `roles/apply_bootstrap/tasks/restore_sealed_secrets_key.yml`,
+included in `apply_bootstrap/tasks/main.yml` right before the bootstrap
+Application is applied. It finds the newest
+`credentials/sealed-secrets-key-*.yaml` (the host-cron backup) and applies it to
+`kube-system` before ArgoCD deploys the controller. No-op on a truly first-ever
+install where no backup exists yet. Note: this only covers the host-cron backup
+location, not the in-cluster CronJob's `/mnt/backup` — fine for now since both
+back up the same underlying secret, but worth remembering if the host-cron
+backup ever stops running.
 
 ---
 

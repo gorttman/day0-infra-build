@@ -8,7 +8,22 @@
     mode: '0600'
   become: true
 
-- name: Restart k3s to apply kubeconfig mode config
+# Without these, k3s auto-detects wlan0 (the primary/default-route interface)
+# as its advertise address and broadcasts that to agents for the tunnel
+# WebSocket. Workers can't reach 192.168.2.x (WiFi AP isolation), so the
+# tunnel never connects and kubectl exec/logs return 502. Pinning both to the
+# wired management NIC fixes it. See docs/pi-1-inventory.md §13b.
+- name: Configure k3s advertise-address and tls-san for the management NIC
+  ansible.builtin.blockinfile:
+    path: /etc/rancher/k3s/config.yaml
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - management NIC advertise address"
+    block: |
+      tls-san:
+        - {{ backend_vlan_ip }}
+      advertise-address: {{ backend_vlan_ip }}
+  become: true
+
+- name: Restart k3s to apply config changes
   ansible.builtin.service:
     name: k3s
     state: restarted

@@ -54,6 +54,8 @@ echo "YOUR_PASSPHRASE" > credentials/wifi/psk
 
 On a rebuild the `credentials/` directory already exists on your secure backup — just copy it across. Ansible reads from these files and configures both ArgoCD repo access and the WiFi NM connection.
 
+If `credentials/sealed-secrets-key-*.yaml` is also present (produced by `scripts/backup_sealed_secrets.sh`), Ansible restores the newest one into `kube-system` before ArgoCD deploys the sealed-secrets controller, so existing SealedSecrets in `day1-foundation`/`day2-services` stay decryptable. No action needed beyond copying the whole `credentials/` directory across.
+
 ---
 
 ## Step 3 — Run the Day-0 bootstrap
