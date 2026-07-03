@@ -1,0 +1,33 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/setup_dns_overlay.yml
+################################################################################
+---
+# Worker nodes reach the gateway/pihole (192.168.2.1) only over WLAN, which has
+# client (AP) isolation enabled - see docs/pi-1-inventory.md Fix 13c / "WiFi AP
+# isolation" note. Their WLAN-supplied DHCP DNS server is therefore unusable,
+# so each node's /etc overlay gets a NetworkManager global-dns override
+# pointing at public resolvers instead. (A version of this was previously
+# hand-patched directly on pinode-01's live overlay with a malformed
+# [global-dns-domain-*] block missing its [global-dns] parent section, which
+# NetworkManager only honored intermittently - see Fix 13c follow-up.)
+
+- name: Write NetworkManager.conf with global-dns override into node etc overlay
+  ansible.builtin.copy:
+    dest: "{{ nfs_cluster_path }}/pinode-{{ item.mac_suffix }}/etc/NetworkManager/NetworkManager.conf"
+    mode: '0644'
+    content: |
+      [main]
+      plugins=ifupdown,keyfile
+      dns=default
+
+      [global-dns]
+      searches=
+
+      [global-dns-domain-*]
+      servers=8.8.8.8,1.1.1.1
+
+      [ifupdown]
+      managed=false
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "pinode-{{ item.mac_suffix }}/etc/NetworkManager/NetworkManager.conf"
