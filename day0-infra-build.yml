@@ -118,3 +118,14 @@
       ansible.builtin.include_role:
         name: nfs_netboot
         tasks_from: add_node
+
+- name: QNAP client storage
+  hosts: all
+  become: true
+  tags:
+    - manage_qnap
+
+  tasks:
+    - name: Configure QNAP NAS resolution and mounts
+      ansible.builtin.include_role:
+        name: qnap_client

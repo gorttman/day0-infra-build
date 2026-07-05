@@ -1,0 +1,27 @@
+---
+# QNAP NAS (valinor-m) client configuration for cluster nodes.
+#
+# The FQDN is pinned in /etc/hosts on the wired face because:
+# - cluster nodes deliberately do NOT use Pi-hole for their own
+#   resolution (DNS chicken-and-egg - see day1 pihole notes), and
+# - kubelet performs NFS PersistentVolume mounts with the NODE's
+#   resolver, so every node that may run a QNAP-mounting pod must
+#   resolve this name;
+# - Pi-hole serves qnap.i3sec.com.au -> 192.168.2.30 (WLAN face) to
+#   normal clients; nodes use the wired face. Split view is intended.
+qnap_fqdn: qnap.i3sec.com.au
+qnap_wired_ip: 192.168.1.30
+
+# Shared NFS root image used by all diskless pinodes - pinning the name
+# here covers every netboot node at once.
+netboot_root_path: /srv/nfs/rpios/latest
+# Per-node overlays; each live pinode NFS-mounts <node>/etc over /etc,
+# so the image pin alone does not reach running nodes.
+netboot_cluster_path: /srv/nfs/cluster
+
+# Host-level convenience mounts on the machine running this play
+# (k8smaster). Apps do NOT use these - pods mount QNAP exports via
+# PersistentVolumes (day1-foundation apps/qnap-storage). Testing only.
+qnap_host_mounts:
+  - path: /mnt/books
+    export: /public_root/books

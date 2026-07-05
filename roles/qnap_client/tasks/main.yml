@@ -1,0 +1,47 @@
+---
+- name: Pin QNAP wired-face FQDN in local /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }}"
+    regexp: '\s{{ qnap_fqdn | regex_escape }}\s*$'
+    state: present
+
+- name: Check whether the netboot shared root image exists
+  ansible.builtin.stat:
+    path: "{{ netboot_root_path }}/etc/hosts"
+  register: netboot_hosts
+
+- name: Pin QNAP wired-face FQDN in the netboot root image (seeds new nodes)
+  ansible.builtin.lineinfile:
+    path: "{{ netboot_root_path }}/etc/hosts"
+    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }}"
+    regexp: '\s{{ qnap_fqdn | regex_escape }}\s*$'
+    state: present
+  when: netboot_hosts.stat.exists
+
+- name: Find per-node /etc overlays (live pinodes mount these over /etc)
+  ansible.builtin.find:
+    paths: "{{ netboot_cluster_path }}"
+    patterns: hosts
+    recurse: true
+    depth: 3
+  register: node_etc_hosts
+
+- name: Pin QNAP wired-face FQDN in each per-node /etc overlay
+  ansible.builtin.lineinfile:
+    path: "{{ item.path }}"
+    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }}"
+    regexp: '\s{{ qnap_fqdn | regex_escape }}\s*$'
+    state: present
+  loop: "{{ node_etc_hosts.files | selectattr('path', 'search', '/etc/hosts$') | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Ensure host-level QNAP test mounts (fstab + mounted)
+  ansible.posix.mount:
+    path: "{{ item.path }}"
+    src: "{{ qnap_fqdn }}:{{ item.export }}"
+    fstype: nfs4
+    opts: _netdev,bg,noatime
+    state: mounted
+  loop: "{{ qnap_host_mounts }}"
