@@ -37,11 +37,26 @@
   loop_control:
     label: "{{ item.path }}"
 
-- name: Ensure host-level QNAP test mounts (fstab + mounted)
+- name: Ensure /mnt/ mount points exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ qnap_host_mounts }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Ensure host-level QNAP mounts (fstab + mounted)
   ansible.posix.mount:
     path: "{{ item.path }}"
     src: "{{ qnap_fqdn }}:{{ item.export }}"
-    fstype: nfs4
-    opts: _netdev,bg,noatime
+    fstype: nfs
+    # nofail: a QNAP outage/reboot must not hang k8smaster's own boot
+    # waiting on this mount - systemd honours it for fstab-derived
+    # mount units the way `bg` (the old NFS-helper-level retry option,
+    # dropped here) never reliably did.
+    opts: "nfsvers=4,_netdev,noatime,nofail"
     state: mounted
   loop: "{{ qnap_host_mounts }}"
+  loop_control:
+    label: "{{ item.path }} -> {{ item.export }}"

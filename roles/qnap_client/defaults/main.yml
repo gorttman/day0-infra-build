@@ -19,9 +19,35 @@ netboot_root_path: /srv/nfs/rpios/latest
 # so the image pin alone does not reach running nodes.
 netboot_cluster_path: /srv/nfs/cluster
 
-# Host-level convenience mounts on the machine running this play
-# (k8smaster). Apps do NOT use these - pods mount QNAP exports via
-# PersistentVolumes (day1-foundation apps/qnap-storage). Testing only.
+# Host-level mounts on the machine running this play (k8smaster).
+# Separate from pod storage - apps claim QNAP exports via
+# PersistentVolumes (day1-foundation apps/qnap-storage), which mount
+# per-pod on whichever node schedules the workload. These are for
+# host-level access to the same shares directly from k8smaster (e.g.
+# admin/backup tooling), not consumed by cluster pods.
+#
+# Export paths are bare top-level names (e.g. /books), NOT prefixed
+# with /public_root - confirmed via `showmount -e qnap.i3sec.com.au`
+# and a real test mount (2026-07-14). The qnap-books PV's
+# /public_root/books path does NOT work as a fresh mount despite being
+# what the live Kavita pod still uses - see day1-foundation
+# apps/qnap-storage for that separate, pre-existing issue.
 qnap_host_mounts:
+  - path: /mnt/inbox
+    export: /inbox
+  - path: /mnt/photos
+    export: /photos
+  - path: /mnt/immich
+    export: /immich
   - path: /mnt/books
-    export: /public_root/books
+    export: /books
+  - path: /mnt/media
+    export: /media
+  - path: /mnt/paperless
+    export: /paperless
+  - path: /mnt/vault
+    export: /vault
+  - path: /mnt/cold
+    export: /cold
+  - path: /mnt/downloads
+    export: /downloads
