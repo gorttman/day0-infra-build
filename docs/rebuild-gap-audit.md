@@ -52,6 +52,45 @@ location, not the in-cluster CronJob's `/mnt/backup` — fine for now since both
 back up the same underlying secret, but worth remembering if the host-cron
 backup ever stops running.
 
+**Regression noted 2026-07-18:** it did stop running — silently, and for the
+wrong reason to boot. `backup_sealed_secrets.sh` had been deliberately dropped
+from `install_helper_scripts`'s `helper_scripts` list at some point (`# Removed
+in favour of kubernetes cron job`), consolidating onto the in-cluster CronJob —
+a reasonable call — but this restore task was never updated to match, and the
+CronJob itself had two problems that meant it wasn't actually a working
+replacement:
+
+1. No `nodeSelector` — it scheduled onto whatever node was free (in practice,
+   pinode-01, a diskless netboot node), writing to a `hostPath` this task never
+   looked at. The backup was running the whole time, just somewhere
+   unreachable during an actual rebuild.
+2. It only captured the single newest key (`tail -n1` on the active-labelled
+   set), not the full history. Existing committed `SealedSecret`s stay
+   encrypted against whichever key was active when they were sealed — they are
+   not re-encrypted on rotation — so a restore with only the newest key would
+   still have permanently orphaned anything sealed against an older one.
+
+Caught live: `crontab -l` for the (deprecated, never actually reinstated) host
+mechanism was empty, and the one leftover file under `credentials/` predated
+the most recent key rotation by three weeks. Re-running `install_day0` to "fix"
+this would have made it worse — it still installs the old host-cron entry via
+`ansible.builtin.cron`, pointing at a script the `helper_scripts` list no
+longer deploys, producing a dead cron line that fails every 5 minutes. That
+entry was removed again rather than kept.
+
+Fixed properly instead: `sealed-secrets-cron.yml` now pins to k8smaster via
+`nodeSelector: kubernetes.io/hostname: k8smaster` and writes directly into
+`day0-infra-build/credentials/` (the same path this restore task reads), backs
+up the full key set instead of just the newest one, and runs daily
+(`0 4 * * *`) instead of its previous typo'd `* 10 * * *` (which actually meant
+"every minute during the 10:00 UTC hour", not "every 5 minutes" as its own
+comment claimed). `restore_sealed_secrets_key.yml` also gained a staleness
+`assert` — if the newest backup on disk is more than 10 days old, the play now
+fails loudly instead of silently restoring a key that's already missing the
+current rotation. Took a fresh manual backup of all 9 live keys on the day of
+this fix to close the immediate gap while the CronJob's corrected schedule
+takes over.
+
 ---
 
 ## High
