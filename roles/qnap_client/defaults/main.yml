@@ -51,3 +51,14 @@ qnap_host_mounts:
     export: /cold
   - path: /mnt/downloads
     export: /downloads
+  - path: /mnt/backup
+    export: /backup
+
+# Where k8smaster's own credentials/ directory (git PAT, sealed-secrets
+# key backups - see day0-infra-build/docs/rebuild-runbook.md Step 2) gets
+# rsynced daily, off this host's disk. /backup is a pre-existing,
+# substantial personal media/data share on the QNAP (Books/Movies/TV/
+# Photo/Data already live at its root) - not a dedicated empty backup
+# target - so this gets its own clearly-named subdirectory rather than
+# landing at the export root.
+credentials_backup_dest: /mnt/backup/k8smaster-credentials

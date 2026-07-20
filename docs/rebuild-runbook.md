@@ -52,9 +52,16 @@ echo "YOUR_SSID"       > credentials/wifi/ssid
 echo "YOUR_PASSPHRASE" > credentials/wifi/psk
 ```
 
-On a rebuild the `credentials/` directory already exists on your secure backup — just copy it across. Ansible reads from these files and configures both ArgoCD repo access and the WiFi NM connection.
+**On a rebuild, pull the `credentials/` directory from the QNAP backup, not from anywhere on this host** — `/mnt/backup/k8smaster-credentials` on `qnap.i3sec.com.au` (`/backup` export), synced nightly by a root cron job the `qnap_client` role installs (`ansible.builtin.cron`, see `roles/qnap_client/tasks/main.yml`). This is a real disaster-recovery path precisely because it lives off this host's disk — until 2026-07-21 this section wrongly assumed "your secure backup" already existed; it didn't, `credentials/` had never left this one Pi. From another machine on the LAN:
+```bash
+mkdir -p credentials
+sudo mount -t nfs -o ro qnap.i3sec.com.au:/backup /mnt/qnap-backup-ro
+cp -r /mnt/qnap-backup-ro/k8smaster-credentials/. credentials/
+sudo umount /mnt/qnap-backup-ro
+```
+Ansible reads from these files and configures both ArgoCD repo access and the WiFi NM connection.
 
-If `credentials/sealed-secrets-key-*.yaml` is also present (produced by `scripts/backup_sealed_secrets.sh`), Ansible restores the newest one into `kube-system` before ArgoCD deploys the sealed-secrets controller, so existing SealedSecrets in `day1-foundation`/`day2-services` stay decryptable. No action needed beyond copying the whole `credentials/` directory across.
+If `credentials/sealed-secrets-key-*.yaml` is also present, Ansible restores the newest one into `kube-system` before ArgoCD deploys the sealed-secrets controller, so existing SealedSecrets in `day1-foundation`/`day2-services` stay decryptable — see `restore_sealed_secrets_key.yml`'s staleness check, which fails loudly rather than silently restoring a key that's missing the current rotation. These files are produced by the in-cluster `sealed-secrets-backup` CronJob (`day0-bootstrap/apps/sealed-secrets/sealed-secrets-cron.yml`), not `scripts/backup_sealed_secrets.sh` — that script was deliberately retired; don't reinstate it. No action needed beyond copying the whole `credentials/` directory across.
 
 ---
 
