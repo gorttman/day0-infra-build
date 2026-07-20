@@ -203,7 +203,7 @@ CronJob fails silently until it's done by hand.
 
 ## Needs a human answer (can't be verified from code)
 
-### 7. Is `credentials/` actually backed up off-box?
+### 7. Is `credentials/` actually backed up off-box? — RESOLVED 2026-07-21
 This audit was run directly on k8smaster. `credentials/` (git PAT,
 sealed-secrets key backups, wifi psk) is gitignored and local-only on this Pi.
 `rebuild-runbook.md` Step 2 says "on a rebuild the `credentials/` directory
@@ -211,6 +211,34 @@ already exists on your secure backup — just copy it across" — but if the Pi'
 storage itself is what's lost in a disaster scenario, this directory goes with
 it unless it's mirrored somewhere else. Worth confirming an actual off-box copy
 exists (1Password, another machine, etc.) rather than assuming it.
+
+**Answer: no off-box copy existed.** This section's assumption was simply
+wrong — `credentials/` had never left this one host's disk. Fixed by adding
+a daily root cron job (`qnap_client` role, `ansible.builtin.cron`) that
+rsyncs `credentials/` to `/mnt/backup/k8smaster-credentials` on the QNAP
+(`/backup` export — a pre-existing personal media share, not a dedicated
+backup target, hence the subdirectory rather than the export root). Two
+real bugs hit getting this working, both worth remembering for the next
+QNAP export added to this role:
+- `rsync -a`'s owner/group preservation (`-o -g`) fails with "Operation
+  not permitted" against this export's UID mapping even running as root —
+  switched to `-rlpt` (no owner/group), which doesn't matter for a backup
+  copy anyway.
+- Enforcing `mode: "0755"` on `/mnt/backup` in the "ensure mountpoint
+  exists" task broke idempotency the moment the path was actually
+  mounted — chmod-ing an NFS-mounted directory hits the same permission
+  wall as chown/chgrp did, for the same underlying reason. The other 9
+  QNAP host mounts don't show this (their export roots are more
+  permissive), but the fix — dropping `mode:` entirely, since it's
+  meaningless once NFS is mounted over the path regardless — applies to
+  all of them and is harmless everywhere.
+
+This closes the gap for `credentials/` specifically (git PAT, sealed-secrets
+keys, wifi psk). It does not cover genuine off-*site* disaster scenarios
+(the QNAP is on the same premises) — that's a deliberate, separate
+trade-off, not an oversight; see the user's stated preference for QNAP as
+the baseline over 1Password/cloud-storage alternatives if this needs
+revisiting later.
 
 ---
 

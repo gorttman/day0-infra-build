@@ -41,7 +41,12 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
-    mode: "0755"
+    # No mode: - meaningless once NFS is mounted over the path anyway
+    # (permissions come from the remote export), and enforcing one here
+    # breaks idempotency on re-runs against an already-mounted /backup:
+    # its export root's permission mapping rejects chmod even as root
+    # ("Operation not permitted", confirmed live 2026-07-21) the way the
+    # other 9 exports' more permissive roots don't.
   loop: "{{ qnap_host_mounts }}"
   loop_control:
     label: "{{ item.path }}"
@@ -60,3 +65,29 @@
   loop: "{{ qnap_host_mounts }}"
   loop_control:
     label: "{{ item.path }} -> {{ item.export }}"
+
+- name: Ensure off-box credentials backup destination exists on the QNAP
+  ansible.builtin.file:
+    path: "{{ credentials_backup_dest }}"
+    state: directory
+    mode: "0700"
+
+# credentials/ (git PAT, sealed-secrets key backups) was gitignored -
+# correctly, it's real plaintext secrets - but that also meant it lived
+# nowhere but this one host's disk. rebuild-runbook.md's Step 2 assumed
+# "your secure backup" already existed; it didn't. This closes that gap
+# the same way the sealed-secrets CronJob fix did: a plain
+# ansible.builtin.cron entry, not a self-rewriting script (that pattern
+# is what silently died last time - see docs/rebuild-gap-audit.md item 2).
+- name: Install daily off-box sync of credentials/ to the QNAP
+  ansible.builtin.cron:
+    name: "Sync day0-infra-build credentials/ to QNAP backup share"
+    minute: "30"
+    hour: "4"
+    # -rlpt not -a: skips owner/group preservation (-o -g), which the QNAP
+    # export's UID mapping rejects with "Operation not permitted" even
+    # when run as root (confirmed live) - content transfers fine either
+    # way, only ownership metadata was ever at issue.
+    job: >-
+      rsync -rlpt --delete {{ playbook_dir }}/credentials/ {{ credentials_backup_dest }}/
+      >> /var/log/credentials-backup-sync.log 2>&1
