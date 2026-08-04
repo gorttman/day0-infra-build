@@ -42,6 +42,13 @@
       failed_when: wifi_up.rc != 0 and 'already active' not in wifi_up.stderr
 
 # === Backend VLAN static IP (end0) ===
+#
+# NOTE (2026-08-04): pinode-01's wired interface/connection is actually
+# named eth0, not end0/backend-vlan like this task assumes - its route
+# was added directly via nmcli against its real "eth0" connection name,
+# not through this task. This task as written only matches k8smaster's
+# naming. Pre-existing inconsistency, not introduced here - worth
+# reconciling if this role is ever run against pinode-01 for real.
 
 - name: Configure static IP on end0 for backend VLAN
   community.general.nmcli:
@@ -50,6 +57,7 @@
     type: ethernet
     ip4: "{{ backend_vlan_ip }}/{{ backend_vlan_prefix }}"
     never_default4: true
+    routes4: "{{ backend_vlan_routes }}"
     autoconnect: true
     state: present
   become: true

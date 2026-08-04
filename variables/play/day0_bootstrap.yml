@@ -42,6 +42,24 @@ config_repos:
 backend_vlan_ip: "192.168.1.10"
 backend_vlan_prefix: "27"
 
+# Host route to the Dream Machine's own management address
+# (192.168.2.1, the Default network) via the backend VLAN's gateway
+# (192.168.1.1 - confirmed live, see day1-foundation apps/unifi-tf
+# HISTORY.md) instead of wlan0. Without this, every cluster node
+# reaches the UniFi API over Wi-Fi, since wlan0 sits directly on
+# 192.168.2.0/24 while end0 only has the on-link backend-vlan route -
+# the kernel always prefers the more specific/directly-connected
+# interface. That's a real risk for unifi-tf's Terraform applies:
+# a WLAN-disrupting change (a radio update, the WLAN resource itself)
+# could cut the very control path being used to apply it, mid-apply.
+# Same fixed IP/gateway on every node - not host-specific, unlike
+# backend_vlan_ip above. Deployed live on k8smaster and pinode-01
+# 2026-08-04 via nmcli directly (survives reboot - it's a connection
+# property, not an ephemeral route); this task codifies it for the
+# next from-scratch rebuild.
+backend_vlan_routes:
+  - "192.168.2.1/32 192.168.1.1"
+
 helper_scripts:
   - seal_secret.sh
 # Removed in favor of kubernetes cron job
