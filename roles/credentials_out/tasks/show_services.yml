@@ -8,14 +8,6 @@
     name: argocd-server
   register: argocd_svc
 
-- name: Read Dashboard service
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ kubeconfig }}"
-    kind: Service
-    namespace: kubernetes-dashboard
-    name: kubernetes-dashboard
-  register: dash_svc
-
 - name: Get ArgoCD initial admin secret
   kubernetes.core.k8s_info:
     kubeconfig: "{{ kubeconfig }}"
@@ -24,22 +16,8 @@
     namespace: argocd
   register: argocd_admin_secret
 
-- name: Wait for admin-user service account
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ kubeconfig }}"
-    api_version: v1
-    kind: ServiceAccount
-    name: admin-user
-    namespace: kubernetes-dashboard
-  register: dashboard_sa
-  until: (dashboard_sa.resources | default([])) | length > 0
-  retries: 30
-  delay: 10
-
-- name: Show ArgoCD and Kubernetes Dashboard credentials
+- name: Show ArgoCD credentials
   ansible.builtin.debug:
     msg:
       - "ArgoCD UI: https://{{ ansible_default_ipv4.address }}:{{ (argocd_svc.resources[0].spec.ports | selectattr('port','equalto',443) | list | first).nodePort }}"
       - "{{ argocd_admin_secret.resources[0].data.password | b64decode }}"
-      - "Kubernetes Dashboard UI: https://{{ ansible_default_ipv4.address }}:{{ (dash_svc.resources[0].spec.ports | selectattr('port','equalto',443) | list | first).nodePort }}"
-      - "Kubernetes Dashboard token: {{ dashboard_token.stdout }}"

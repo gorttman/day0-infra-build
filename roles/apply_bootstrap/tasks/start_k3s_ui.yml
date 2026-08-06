@@ -26,71 +26,13 @@
             nodePort: "{{ argocd_https_port }}"
   become: true
 
-- name: Expose Kubernetes Dashboard service
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}" 
-    state: present
-    namespace: kubernetes-dashboard
-    definition:
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: kubernetes-dashboard
-      spec:
-        type: NodePort
-        selector:
-          k8s-app: kubernetes-dashboard
-        ports:
-          - port: 443
-            targetPort: 8443
-            nodePort: "{{ dash_https_port }}"
-
-- name: Create Dashboard admin user
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}" 
-    state: present
-    namespace: kubernetes-dashboard
-    definition:
-      apiVersion: v1
-      kind: ServiceAccount
-      metadata:
-        name: admin-user
-        namespace: kubernetes-dashboard
-
-- name: Bind cluster-admin to Dashboard admin user
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}" 
-    state: present
-    definition:
-      apiVersion: rbac.authorization.k8s.io/v1
-      kind: ClusterRoleBinding
-      metadata:
-        name: dashboard-admin-user
-      roleRef:
-        apiGroup: rbac.authorization.k8s.io
-        kind: ClusterRole
-        name: cluster-admin
-      subjects:
-        - kind: ServiceAccount
-          name: admin-user
-          namespace: kubernetes-dashboard
-
-- name: Wait for admin-user ServiceAccount
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ kubeconfig }}" 
-    api_version: v1
-    kind: ServiceAccount
-    name: admin-user
-    namespace: kubernetes-dashboard
-  register: admin_sa
-  until: admin_sa.resources | length > 0
-  retries: 20
-  delay: 5
-  become: true
-
-- name: Get Kubernetes Dashboard token
-  ansible.builtin.command: >
-    kubectl -n kubernetes-dashboard create token admin-user
-  register: dashboard_token
-  changed_when: false
+# Kubernetes Dashboard was removed 2026-08-07: it was a whole
+# cluster-admin-capable app, installed via a raw upstream manifest
+# (never GitOps-tracked), exposed on the LAN via NodePort, with a
+# dedicated cluster-admin ServiceAccount + token printed as bootstrap
+# output every rebuild - 281 days of standing attack surface for
+# something nobody had used. Argo CD's own UI plus kubectl already
+# cover what it was for. See day1-foundation - the retired
+# apps/coredns app's README documents the same "things that only look
+# fine until something exercises them" audit that found this.
 

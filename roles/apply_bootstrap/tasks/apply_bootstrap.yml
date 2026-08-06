@@ -6,12 +6,6 @@
     namespace: argocd
     src: "{{ bootstrap_app_path }}"
 
-- name: Apply Kubernetes Dashboard manifest
-  kubernetes.core.k8s:
-    state: present
-    src: https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-    kubeconfig: "{{ kubeconfig }}"
-
 - name: Get ArgoCD initial admin secret
   kubernetes.core.k8s_info:
     kind: Secret

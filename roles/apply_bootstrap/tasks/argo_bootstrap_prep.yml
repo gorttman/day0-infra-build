@@ -16,3 +16,47 @@
     state: present
     src: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
 
+- name: Wait for argocd-repo-server Deployment to exist before patching it
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: Deployment
+    namespace: argocd
+    name: argocd-repo-server
+  register: repo_server_deploy
+  until: repo_server_deploy.resources | length > 0
+  retries: 30
+  delay: 5
+
+# The upstream install.yaml ships argocd-repo-server's `tmp` volume as a
+# plain `emptyDir: {}`. This node's default emptyDir storage is NFS-backed
+# (local_lock=none), which fails flock() with ENOLCK - repo-server needs
+# real file locks for its own git working-copy cache under /tmp/_argocd-repo,
+# same root cause as the cloudflare-tf/unifi-tf state-locking workaround.
+# Found 2026-08-06/07: this silently broke `terraform plan`/`apply` sync
+# status ("Unknown") across every Application in the cluster for hours
+# after a reboot, surfacing as "no locks available" and (on a related
+# permission-corruption incident that same night) "permission denied"
+# cleaning the git cache dir. medium: Memory (tmpfs) avoids it, same as
+# every other app in this cluster that touches a real lock file.
+- name: Patch argocd-repo-server's tmp volume to tmpfs (avoid NFS emptyDir flock failures)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: Deployment
+    namespace: argocd
+    name: argocd-repo-server
+    merge_type: strategic-merge
+    definition:
+      spec:
+        template:
+          spec:
+            # PodSpec.volumes is a strategic-merge list keyed on `name`,
+            # so this replaces only the "tmp" volume by name regardless
+            # of its position in upstream's install.yaml - not a
+            # positional/JSON-patch index, which would silently patch
+            # the wrong volume if a future argocd_version reorders them.
+            volumes:
+              - name: tmp
+                emptyDir:
+                  medium: Memory
+                  sizeLimit: 2Gi
+
