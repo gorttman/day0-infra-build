@@ -10,6 +10,22 @@
 # hand-patched directly on pinode-01's live overlay with a malformed
 # [global-dns-domain-*] block missing its [global-dns] parent section, which
 # NetworkManager only honored intermittently - see Fix 13c follow-up.)
+#
+# rc-manager=file added 2026-08-07, root-caused via a real reboot test
+# during a full cluster audit: without it, NetworkManager auto-detects
+# how to write /etc/resolv.conf, and on this image it detects "symlink"
+# mode (expects systemd-resolved to own /etc/resolv.conf) even though
+# systemd-resolved isn't installed here (`inactive`, `not-found`).
+# Every cold boot therefore left /etc/resolv.conf empty - DNS, NTP
+# (empty DNS -> can't resolve pool.ntp.org -> clock never syncs, this
+# Pi has no RTC), and k3s-agent's TLS handshake (wrong clock) all
+# cascaded from this one misdetection. A live nmcli reconnect looked
+# like it fixed it at the time but didn't survive the next real
+# reboot - same "looks fixed until actually tested" trap as the
+# coredns incident that same night. Forcing rc-manager=file makes
+# NetworkManager write /etc/resolv.conf directly every time,
+# regardless of what it detects - verified against two real reboots,
+# not just a service restart.
 
 - name: Write NetworkManager.conf with global-dns override into node etc overlay
   ansible.builtin.copy:
@@ -19,6 +35,7 @@
       [main]
       plugins=ifupdown,keyfile
       dns=default
+      rc-manager=file
 
       [global-dns]
       searches=
