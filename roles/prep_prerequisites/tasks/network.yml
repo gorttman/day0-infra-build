@@ -41,6 +41,56 @@
       changed_when: "'successfully activated' in wifi_up.stdout"
       failed_when: wifi_up.rc != 0 and 'already active' not in wifi_up.stderr
 
+# === DNS resilience on the wireless management interface ===
+# Deliberately NOT gated on the wifi-mgmt block above, and doesn't
+# assume that connection's name: on this host (k8smaster), the
+# credentials/wifi/ssid file has never existed, so that block has
+# never run, and wlan0 is instead managed by a connection profile the
+# Raspberry Pi Imager itself pre-baked at flash time, named after the
+# SSID ("ARDA_HOME") - not "wifi-mgmt". Confirmed live 2026-08-07.
+# Discovering the real active wireless connection name here means
+# this keeps working whether the profile came from the block above or
+# from the imager.
+#
+# Why this matters at all: without it, wlan0 resolves *.i3sec.com.au
+# via the router/public DNS, which has no idea about the internal
+# split-horizon record and sends every request out through Cloudflare's
+# public edge and its WAF instead of straight to the LAN service. Pi-hole
+# stays first in the list, not the only entry - this same host runs
+# Pi-hole's own pod, so it's also the machine you'd reach for to fix
+# Pi-hole if Pi-hole were the thing broken, and it needs to keep
+# resolving names either way.
+
+- name: Discover the active wireless connection name
+  ansible.builtin.command: nmcli -t -f NAME,TYPE connection show --active
+  register: active_connections
+  changed_when: false
+
+- name: Set wireless connection name fact
+  ansible.builtin.set_fact:
+    wifi_conn_name: "{{ (active_connections.stdout_lines
+      | select('search', ':802-11-wireless$')
+      | map('regex_replace', ':802-11-wireless$', '')
+      | list) | first | default(omit) }}"
+
+- name: Ensure Pi-hole is the primary DNS server on the wireless connection
+  when: wifi_conn_name is defined
+  become: true
+  block:
+    - name: Set DNS servers on the wireless connection
+      community.general.nmcli:
+        conn_name: "{{ wifi_conn_name }}"
+        type: wifi
+        dns4: "{{ wifi_mgmt_dns }}"
+        dns4_ignore_auto: true
+        state: present
+
+    - name: Reapply the wireless connection to pick up the DNS change
+      ansible.builtin.command: "nmcli connection up {{ wifi_conn_name }}"
+      register: wifi_dns_up
+      changed_when: "'successfully activated' in wifi_dns_up.stdout"
+      failed_when: wifi_dns_up.rc != 0 and 'already active' not in wifi_dns_up.stderr
+
 # === Backend VLAN static IP (end0) ===
 
 - name: Configure static IP on end0 for backend VLAN
