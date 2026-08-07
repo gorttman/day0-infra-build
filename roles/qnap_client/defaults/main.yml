@@ -9,7 +9,26 @@
 #   resolve this name;
 # - Pi-hole serves qnap.i3sec.com.au -> 192.168.2.30 (WLAN face) to
 #   normal clients; nodes use the wired face. Split view is intended.
+#
+# qnap_short added 2026-08-07: a bare hosts-file name, deliberately not
+# DNS-resolvable at all, so any consumer using it can never silently
+# fall back to a public/WLAN-facing answer the way the FQDN briefly
+# looked like it might (see the getent-hosts-vs-ahostsv4 IPv6 note
+# below) - it only ever resolves to the wired-face IP pinned here, or
+# fails outright. New NFS mount specs (k8s PersistentVolumes, fstab
+# entries) should prefer this over the FQDN going forward.
+#
+# Both names are IPv4-only in /etc/hosts. `getent hosts` (which queries
+# both address families) falls through to public DNS for the missing
+# AAAA record on qnap.i3sec.com.au - a real, registered domain with its
+# own unrelated public DNS - and returns real Cloudflare IPv6
+# addresses, nothing to do with this QNAP. Confirmed harmless for
+# actual NFS mounting (`getent ahostsv4` / explicit AF_INET resolution
+# correctly returns the wired IP on both nodes, 2026-08-07) since this
+# LAN is IPv4-only throughout, but worth knowing if anything here ever
+# starts preferring IPv6.
 qnap_fqdn: qnap.i3sec.com.au
+qnap_short: qnap
 qnap_wired_ip: 192.168.1.30
 
 # Shared NFS root image used by all diskless pinodes - pinning the name

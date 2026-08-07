@@ -1,8 +1,8 @@
 ---
-- name: Pin QNAP wired-face FQDN in local /etc/hosts
+- name: Pin QNAP wired-face FQDN and short name in local /etc/hosts
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }}"
+    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }} {{ qnap_short }}"
     regexp: '\s{{ qnap_fqdn | regex_escape }}\s*$'
     state: present
 
@@ -11,10 +11,10 @@
     path: "{{ netboot_root_path }}/etc/hosts"
   register: netboot_hosts
 
-- name: Pin QNAP wired-face FQDN in the netboot root image (seeds new nodes)
+- name: Pin QNAP wired-face FQDN and short name in the netboot root image (seeds new nodes)
   ansible.builtin.lineinfile:
     path: "{{ netboot_root_path }}/etc/hosts"
-    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }}"
+    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }} {{ qnap_short }}"
     regexp: '\s{{ qnap_fqdn | regex_escape }}\s*$'
     state: present
   when: netboot_hosts.stat.exists
@@ -27,10 +27,10 @@
     depth: 3
   register: node_etc_hosts
 
-- name: Pin QNAP wired-face FQDN in each per-node /etc overlay
+- name: Pin QNAP wired-face FQDN and short name in each per-node /etc overlay
   ansible.builtin.lineinfile:
     path: "{{ item.path }}"
-    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }}"
+    line: "{{ qnap_wired_ip }} {{ qnap_fqdn }} {{ qnap_short }}"
     regexp: '\s{{ qnap_fqdn | regex_escape }}\s*$'
     state: present
   loop: "{{ node_etc_hosts.files | selectattr('path', 'search', '/etc/hosts$') | list }}"
