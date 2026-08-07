@@ -72,6 +72,13 @@ qnap_host_mounts:
     export: /downloads
   - path: /mnt/backup
     export: /backup
+  # Public was a pre-existing manual /etc/fstab entry, not managed by
+  # this role at all - and not by the wired-face short name either
+  # (192.168.2.30, the WLAN face). Found and fixed 2026-08-07 during
+  # the same short-name migration - added here so a future rebuild
+  # actually recreates it instead of silently losing it.
+  - path: /mnt/nfs
+    export: /Public
 
 # Where k8smaster's own credentials/ directory (git PAT, sealed-secrets
 # key backups - see day0-infra-build/docs/rebuild-runbook.md Step 2) gets
