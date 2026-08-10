@@ -3,14 +3,23 @@
 ################################################################################
 ---
 # Separate pass from ensure_directory.yml rather than one combined
-# mkdir-&& chown command: the /backup export's squash mapping has
-# already been observed to reject writes from a mismatched uid (root
-# included - see roles/qnap_client/tasks/main.yml's mode: comment), so
-# a wrong uid/gid here is a distinct, separately-diagnosable failure
-# from the directory simply not existing.
+# mkdir-&& chown command: the /backup export's ownership requirements
+# have already caused two separate live failures (root_squash denying
+# writes, then all_squash forcing a fixed uid regardless of container
+# identity - see roles/qnap_exports for that history), so a wrong
+# uid/gid here is a distinct, separately-diagnosable failure from the
+# directory simply not existing.
+#
+# -R is load-bearing, not defensive: confirmed live 2026-08-10 that a
+# non-recursive chown here only fixes the top-level stream directory,
+# not subdirectories a workload already created under it before an
+# ownership change (e.g. daily/weekly/monthly, created once by
+# postgres-backup's own mkdir -p and never touched again) - those kept
+# their stale owner and silently started failing writes the next time
+# the export's squash mode changed under them.
 - name: Ensure each backup stream's directory has the correct owner
   ansible.builtin.raw: >-
-    chown {{ item.uid }}:{{ item.gid }} '{{ qnap_backup_disk_root }}/{{ item.path }}'
+    chown -R {{ item.uid }}:{{ item.gid }} '{{ qnap_backup_disk_root }}/{{ item.path }}'
   loop: "{{ qnap_backup_dirs }}"
   loop_control:
     label: "{{ item.path }} -> {{ item.uid }}:{{ item.gid }}"
