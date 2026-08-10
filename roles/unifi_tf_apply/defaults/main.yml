@@ -1,0 +1,17 @@
+---
+# See README.md for the full design rationale (relocated from
+# day1-foundation 2026-08-10, deliberately out of ArgoCD entirely).
+#
+# Two explicit overrides are how anything actually changes live -
+# neither defaults on:
+#   -e unifi_tf_do_apply=true       run `terraform apply` after a clean
+#                                    plan (default: plan-only)
+#   -e unifi_tf_allow_destroy=true  override the destroy-guard if a
+#                                    plan genuinely needs to destroy
+#                                    something (default: refuse)
+unifi_tf_do_apply: false
+unifi_tf_allow_destroy: false
+
+unifi_tf_namespace: infra
+unifi_tf_job_name: unifi-tf-apply-manual
+unifi_tf_configmap_name: unifi-tf-apply-config

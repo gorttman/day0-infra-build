@@ -1,0 +1,95 @@
+---
+- name: Ensure the infra namespace exists
+  ansible.builtin.command:
+    cmd: kubectl create namespace {{ unifi_tf_namespace }} --dry-run=client -o yaml
+  register: unifi_tf_ns_yaml
+  changed_when: false
+
+- name: Apply the infra namespace
+  ansible.builtin.shell: |
+    echo '{{ unifi_tf_ns_yaml.stdout }}' | kubectl apply -f -
+  changed_when: true
+
+# The SealedSecret's own encrypted blob is unchanged from when it was
+# originally sealed against this cluster's controller - applying it
+# here just makes this role self-sufficient for this, not dependent
+# on day1-foundation/ArgoCD to keep it present.
+- name: Ensure unifi-tf-secrets exists (re-applies the sealed secret manifest)
+  ansible.builtin.command:
+    cmd: kubectl apply -f {{ role_path }}/files/unifi-tf-sealedsecret.yml
+  changed_when: true
+
+- name: Build the scratch ConfigMap from the current terraform/ directory
+  ansible.builtin.shell: |
+    set -euo pipefail
+    kubectl create configmap {{ unifi_tf_configmap_name }} -n {{ unifi_tf_namespace }} \
+      $(for f in {{ role_path }}/files/terraform/*.tf; do echo --from-file="$f"; done) \
+      --dry-run=client -o yaml | kubectl apply -f -
+  changed_when: true
+
+- name: Render the apply Job manifest
+  ansible.builtin.template:
+    src: unifi-tf-apply-job.yml.j2
+    dest: /tmp/{{ unifi_tf_job_name }}.yml
+    mode: "0600"
+
+- name: Remove any previous run of this Job
+  ansible.builtin.command:
+    cmd: kubectl delete job {{ unifi_tf_job_name }} -n {{ unifi_tf_namespace }} --ignore-not-found
+  changed_when: true
+
+- name: Apply the Job
+  ansible.builtin.command:
+    cmd: kubectl apply -f /tmp/{{ unifi_tf_job_name }}.yml
+  changed_when: true
+
+- name: Wait for the Job to reach a terminal state
+  # Deliberately NOT .status.conditions[0].type - confirmed live
+  # 2026-08-10 that newer Kubernetes puts "SuccessCriteriaMet" first in
+  # the conditions array, with "Complete" second, so checking index 0
+  # never matched and looped forever even though the Job had already
+  # finished.
+  #
+  # Also deliberately NOT a combined jsonpath with a literal separator
+  # (e.g. {.status.succeeded}{"/"}{.status.failed}) - confirmed live
+  # 2026-08-10 that ansible.builtin.command doesn't go through a shell,
+  # so its shlex-splitting strips the embedded quotes before kubectl
+  # ever sees them, breaking the jsonpath syntax outright. Fetching
+  # full JSON and parsing with Ansible's own from_json filter
+  # sidesteps the whole class of problem.
+  ansible.builtin.command:
+    cmd: kubectl get job {{ unifi_tf_job_name }} -n {{ unifi_tf_namespace }} -o json
+  register: unifi_tf_job_json_raw
+  until: >-
+    (unifi_tf_job_json_raw.stdout | from_json).status.succeeded is defined or
+    (unifi_tf_job_json_raw.stdout | from_json).status.failed is defined
+  retries: 100
+  delay: 6
+  changed_when: false
+
+- name: Determine whether the Job succeeded or failed
+  ansible.builtin.set_fact:
+    unifi_tf_job_failed: "{{ (unifi_tf_job_json_raw.stdout | from_json).status.failed is defined }}"
+
+- name: Fetch the Job's plan/apply output
+  ansible.builtin.command:
+    cmd: kubectl logs -n {{ unifi_tf_namespace }} job/{{ unifi_tf_job_name }}
+  register: unifi_tf_job_logs
+  changed_when: false
+
+- name: Show the plan/apply output
+  ansible.builtin.debug:
+    msg: "{{ unifi_tf_job_logs.stdout_lines }}"
+
+- name: Clean up the Job and scratch ConfigMap
+  ansible.builtin.command:
+    cmd: "{{ item }}"
+  loop:
+    - "kubectl delete job {{ unifi_tf_job_name }} -n {{ unifi_tf_namespace }} --ignore-not-found"
+    - "kubectl delete configmap {{ unifi_tf_configmap_name }} -n {{ unifi_tf_namespace }} --ignore-not-found"
+  changed_when: true
+
+- name: Fail the play if the Job itself failed (destroy-guard tripped, or a real error)
+  ansible.builtin.fail:
+    msg: "{{ unifi_tf_job_name }} failed - see the plan/apply output above for why."
+  when: unifi_tf_job_failed | bool
