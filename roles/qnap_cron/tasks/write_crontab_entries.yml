@@ -1,0 +1,19 @@
+################################################################################
+# FILE: roles/qnap_cron/tasks/write_crontab_entries.yml
+################################################################################
+---
+# ansible.builtin.raw again, not .cron: that module also pushes and
+# executes Python on the target, same problem as .file/.copy elsewhere
+# in this repo's QNAP roles. Idempotency is hand-rolled here since raw
+# gives no structured state to check against - each entry's `name`
+# becomes a trailing crontab comment, and the append is skipped if a
+# line carrying that comment already exists.
+- name: Ensure each cron entry exists in the persistent crontab file
+  ansible.builtin.raw: >-
+    grep -qF '# {{ item.name }}' {{ qnap_crontab_file }} 2>/dev/null ||
+    echo '{{ item.schedule }} {{ item.command }} # {{ item.name }}' >> {{ qnap_crontab_file }}
+  loop: "{{ qnap_cron_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+  notify: Reload QNAP crontab

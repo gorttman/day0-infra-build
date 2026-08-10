@@ -1,0 +1,17 @@
+################################################################################
+# FILE: variables/cli/group_vars/qnap.yml
+################################################################################
+---
+# Same IP as roles/qnap_client/defaults/main.yml's qnap_wired_ip - can't
+# reference that var directly (role defaults aren't in scope for
+# inventory/group_vars resolution in a different play), so it's
+# duplicated here rather than silently assumed. If the QNAP's wired-face
+# IP ever changes, both places need updating.
+ansible_host: 192.168.1.30
+ansible_user: admin
+ansible_connection: ssh
+# Dedicated key, not the general-purpose one - same convention as
+# pinode_cluster_ed25519 for the pinode nodes. Installed into the QNAP
+# admin account's authorized_keys 2026-08-07, replacing the password
+# auth docs/rebuild-runbook.md Step 5 still shows.
+ansible_ssh_private_key_file: ~/.ssh/qnap_ansible_ed25519

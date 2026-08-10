@@ -84,10 +84,22 @@
     name: "Sync day0-infra-build credentials/ to QNAP backup share"
     minute: "30"
     hour: "4"
+    # mountpoint guard: the /mnt/ mount above uses nofail/_netdev
+    # deliberately (a QNAP outage must not hang boot), but that also
+    # means a dead mount fails silent rather than loud - a stuck mount
+    # would otherwise leave rsync happily syncing into a plain empty
+    # local directory instead of the QNAP, indefinitely, with nothing
+    # ever erroring. Confirmed live 2026-08-08 that this actually
+    # happens (a QNAP-side NFS restart dropped this exact mount and
+    # nothing noticed until checked by hand) - refuse and log loudly
+    # instead, same "fail loud not silent" principle as
+    # restore_sealed_secrets_key.yml's staleness assert.
     # -rlpt not -a: skips owner/group preservation (-o -g), which the QNAP
     # export's UID mapping rejects with "Operation not permitted" even
     # when run as root (confirmed live) - content transfers fine either
     # way, only ownership metadata was ever at issue.
     job: >-
+      if mountpoint -q {{ credentials_backup_dest | dirname }}; then
       rsync -rlpt --delete {{ playbook_dir }}/credentials/ {{ credentials_backup_dest }}/
-      >> /var/log/credentials-backup-sync.log 2>&1
+      >> /var/log/credentials-backup-sync.log 2>&1; else
+      echo "$(date -Iseconds) ERROR: {{ credentials_backup_dest | dirname }} is not mounted - refusing to sync, this would otherwise write to local disk" >> /var/log/credentials-backup-sync.log; fi

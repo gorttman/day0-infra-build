@@ -1,0 +1,6 @@
+################################################################################
+# FILE: roles/qnap_cron/tasks/main.yml
+################################################################################
+---
+- name: Include crontab entry tasks
+  ansible.builtin.include_tasks: write_crontab_entries.yml

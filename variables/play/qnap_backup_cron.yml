@@ -1,0 +1,21 @@
+################################################################################
+# FILE: variables/play/qnap_backup_cron.yml
+################################################################################
+---
+# Persistent QNAP crontab file - NOT live crond state (`crontab -e`),
+# which QTS does not reliably persist across reboots/firmware updates on
+# its own. /etc/config/crontab is the flash-backed source QNAP reloads
+# from on boot - same persistence pattern already confirmed for NFS
+# exports (/etc/config/nfssetting, see docs/rebuild-runbook.md Step 5).
+# NOT yet verified live against this specific box - confirm the file
+# exists and matches this format before trusting the role against it.
+qnap_crontab_file: /etc/config/crontab
+
+# Empty for now - nothing to schedule yet. The QNAP-data snapshot job
+# (day2-services project_qnap_backup_design task #5) isn't built, and
+# the Pi-hosted script-serving mount ("sneaky method") isn't either, so
+# there's no real command to point a cron entry at. Add entries here
+# once one exists - {name, schedule, command}. `name` must be unique:
+# it doubles as the idempotency marker (a trailing crontab comment),
+# not just a label, so re-running the play doesn't duplicate the line.
+qnap_cron_jobs: []

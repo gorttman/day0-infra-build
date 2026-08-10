@@ -1,0 +1,12 @@
+################################################################################
+# FILE: roles/qnap_exports/handlers/main.yml
+################################################################################
+---
+# Restarting the QNAP's whole NFS service briefly interrupts every
+# mounted client across the cluster, not just the one export that
+# changed - only fires when ensure_squash.yml actually changed
+# something, not on every run. /etc/init.d/nfs, not nfs.sh - confirmed
+# live 2026-08-08 (the rebuild-runbook's Step 5 example script name
+# doesn't exist on this QNAP's firmware version).
+- name: Restart QNAP NFS service
+  ansible.builtin.raw: /etc/init.d/nfs restart

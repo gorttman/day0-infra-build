@@ -1,0 +1,17 @@
+################################################################################
+# FILE: roles/qnap_backup_dirs/tasks/ensure_directory.yml
+################################################################################
+---
+# ansible.builtin.raw, not .file: QNAP's stock shell is BusyBox with no
+# confirmed Python (no lsblk, no entware confirmed as of 2026-08-07) -
+# every other file/directory module pushes and executes a Python module
+# on the target. raw is a plain SSH-and-execute, no interpreter needed.
+- name: Ensure each backup stream's directory exists
+  ansible.builtin.raw: >-
+    mkdir -p '{{ qnap_backup_disk_root }}/{{ item.path }}'
+  loop: "{{ qnap_backup_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+  # raw has no structured output to infer changed/failed from, and
+  # mkdir -p is safely idempotent to just re-run every time.
+  changed_when: true

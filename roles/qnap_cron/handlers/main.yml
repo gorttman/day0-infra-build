@@ -1,0 +1,9 @@
+################################################################################
+# FILE: roles/qnap_cron/handlers/main.yml
+################################################################################
+---
+# Writing to /etc/config/crontab alone doesn't reach the running crond -
+# this loads the persistent file into the live scheduler, same
+# reload-after-config-change shape as nfs_netboot's own handlers.
+- name: Reload QNAP crontab
+  ansible.builtin.raw: crontab {{ qnap_crontab_file }}

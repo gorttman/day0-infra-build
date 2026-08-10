@@ -1,0 +1,9 @@
+################################################################################
+# FILE: roles/qnap_backup_dirs/tasks/main.yml
+################################################################################
+---
+- name: Include directory-creation tasks
+  ansible.builtin.include_tasks: ensure_directory.yml
+
+- name: Include ownership tasks
+  ansible.builtin.include_tasks: set_ownership.yml
