@@ -13,7 +13,21 @@
 # WebSocket. Workers can't reach 192.168.2.x (WiFi AP isolation), so the
 # tunnel never connects and kubectl exec/logs return 502. Pinning both to the
 # wired management NIC fixes it. See docs/pi-1-inventory.md §13b.
-- name: Configure k3s advertise-address and tls-san for the management NIC
+#
+# node-ip added 2026-08-10: without it, k8smaster's own node-ip/flannel
+# public-ip also auto-detects onto wlan0 (same root cause, different
+# symptom - confirmed live: WLAN retry storms and reconnects were dragging
+# down pod-to-pod traffic even though pinode-01's node-ip was already
+# correctly pinned to the wired backend network). Matches pinode-01's own
+# `--node-ip` setting (see nfs_netboot/tasks/setup_k3s_agent_overlay.yml) -
+# both nodes now keep ALL cluster traffic (control-plane + flannel VXLAN)
+# on the wired backend network, with wlan0 free to be purely the general
+# internet-egress path it was always meant to be. After a restart, k3s's
+# own `flannel.alpha.coreos.com/public-ip` node annotation does NOT
+# self-correct to match the new node-ip (confirmed live) - a
+# `kubectl annotate node <name> flannel.alpha.coreos.com/public-ip=<ip>
+# --overwrite` is required alongside this change, every time.
+- name: Configure k3s advertise-address, tls-san, and node-ip for the management NIC
   ansible.builtin.blockinfile:
     path: /etc/rancher/k3s/config.yaml
     marker: "# {mark} ANSIBLE MANAGED BLOCK - management NIC advertise address"
@@ -21,6 +35,7 @@
       tls-san:
         - {{ backend_vlan_ip }}
       advertise-address: {{ backend_vlan_ip }}
+      node-ip: {{ backend_vlan_ip }}
   become: true
 
 - name: Restart k3s to apply config changes
@@ -28,6 +43,28 @@
     name: k3s
     state: restarted
   become: true
+
+- name: Wait for k3s API to come back after restart
+  ansible.builtin.wait_for:
+    port: 6443
+    host: 127.0.0.1
+    timeout: 120
+
+# k3s's own flannel.alpha.coreos.com/public-ip node annotation does not
+# self-correct after a node-ip change (confirmed live 2026-08-10) - it
+# keeps whatever it was set to before the restart, silently pointing
+# flannel's VXLAN endpoint at the wrong IP until manually corrected. Left
+# alone, this reproduces the exact stale-FDB bug found on pinode-01 the
+# same night, just self-inflicted by this role instead of inherited.
+- name: Correct flannel's public-ip annotation to match the new node-ip
+  ansible.builtin.command:
+    cmd: >-
+      kubectl annotate node {{ ansible_hostname }}
+      flannel.alpha.coreos.com/public-ip={{ backend_vlan_ip }} --overwrite
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  become: true
+  changed_when: true
 
 - name: Extract kubeseal binary
   unarchive:
