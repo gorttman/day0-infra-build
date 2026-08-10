@@ -17,17 +17,26 @@ qnap_backup_disk_root: /share/external/DEV3302_1
 # project existed (see day2-services project_qnap_backup_design memory).
 # Add a stream here and re-run the play - no role/task changes needed.
 #
-# uid/gid: NOT the consuming workload's own uid - confirmed live
-# 2026-08-07 (`grep DEV3302_1 /etc/config/nfssetting`) that /backup's
-# export is `all_squash` with AnonUID=1000/AnonGID=100. all_squash means
-# every client uid gets remapped to that fixed pair, root included - a
-# pod's securityContext.runAsUser never actually reaches the server, so
-# these values must always be 1000:100 for this export regardless of
-# what uid the writing container runs as. (First attempt used the
-# postgres image's own uid, 70:70, which predictably still got denied -
-# root_squash was the wrong mental model here, this export doesn't just
-# squash root, it squashes everyone.)
+# uid/gid: must match the consuming workload's own container uid -
+# /backup is no_root_squash (see roles/qnap_exports), so whatever uid
+# a pod's securityContext.runAsUser sets is exactly what reaches the
+# server, unmapped. postgres-backup runs as 70:70 (the postgres image's
+# own built-in uid, see day2-services/apps/postgres/postgres-backup-cronjob.yml).
+#
+# History, since this value has been wrong twice for two different
+# reasons: this export was briefly all_squash (AnonUID=1000/GID=100)
+# during initial debugging, which forced every write to that fixed
+# pair regardless of container uid - so this was set to 1000:100 to
+# match. That squash setting turned out to be the actual root cause of
+# a separate, worse bug (kubelet's pod-level nfs: volumes failing
+# outright) and was switched to no_root_squash 2026-08-09 - which
+# silently broke this value, since 70:70 is what actually matters now
+# and nothing here was updated to match until the next scheduled
+# backup run would have failed (caught live 2026-08-10, not from a
+# real failure). Lesson: an export's squash mode and this file's
+# uid/gid values are coupled, changing one without checking the other
+# is exactly how this regressed.
 qnap_backup_dirs:
   - path: active_backup/postgres
-    uid: 1000
-    gid: 100
+    uid: 70
+    gid: 70
