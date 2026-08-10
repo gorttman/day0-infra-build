@@ -1,0 +1,211 @@
+################################################################################
+# FILE: unifi-tf-apply.yml
+################################################################################
+# Relocated here from day1-foundation 2026-08-10, deliberately OUT of
+# ArgoCD's GitOps/automated-sync path entirely. This app manages the
+# live household UDM/gateway/APs - the same class of thing a real
+# incident already proved is too dangerous to apply unattended: on
+# 2026-08-05, a `terraform apply` run for real from an unmerged feature
+# branch left the shared Postgres state ahead of main's config, and the
+# very next unrelated commit to land on main made ArgoCD's own
+# automated selfHeal see that divergence and silently DESTROY the live
+# WLAN (and, it turned out later, security-settings and 30 client
+# records too - only the WLAN loss was noticed at the time). A
+# destroy-guard was added afterward, but the deeper problem was letting
+# *any* commit automatically trigger a real apply against physical
+# network infrastructure at all. This playbook is the fix for that:
+# nothing here runs except when a human explicitly invokes it.
+#
+# Two separate, deliberate confirmations are required to actually
+# change anything live - neither is the default:
+#   -e unifi_tf_do_apply=true      - actually run `terraform apply`
+#                                     after a clean plan (default:
+#                                     plan-only, changes nothing)
+#   -e unifi_tf_allow_destroy=true - override the destroy-guard if a
+#                                     plan genuinely needs to destroy
+#                                     something (default: refuse)
+#
+# Run with:
+#   ansible-playbook unifi-tf-apply.yml                              # plan only
+#   ansible-playbook unifi-tf-apply.yml -e unifi_tf_do_apply=true     # plan + apply, refuses any destroy
+#
+# terraform/*.tf files live alongside this playbook in unifi-tf/ -
+# see unifi-tf/README.md and unifi-tf/HISTORY.md for the full history
+# and design rationale (both moved here unchanged from
+# day1-foundation/apps/unifi-tf/).
+
+- name: Apply UniFi Terraform config (plan always; apply only when explicitly requested)
+  hosts: k8smaster
+  gather_facts: false
+  vars:
+    unifi_tf_dir: "{{ playbook_dir }}/unifi-tf"
+    unifi_tf_namespace: infra
+    unifi_tf_do_apply: false
+    unifi_tf_allow_destroy: false
+    unifi_tf_job_name: unifi-tf-apply-manual
+    unifi_tf_configmap_name: unifi-tf-apply-config
+
+  tasks:
+    - name: Ensure the infra namespace exists
+      ansible.builtin.command:
+        cmd: kubectl create namespace {{ unifi_tf_namespace }} --dry-run=client -o yaml
+      register: ns_yaml
+      changed_when: false
+
+    - name: Apply the infra namespace
+      ansible.builtin.shell: |
+        echo '{{ ns_yaml.stdout }}' | kubectl apply -f -
+      changed_when: true
+
+    # The SealedSecret's own encrypted blob is unchanged from when it
+    # was originally sealed against this cluster's controller - applying
+    # it here just makes day0-infra-build self-sufficient for this, not
+    # dependent on day1-foundation/ArgoCD to keep it present.
+    - name: Ensure unifi-tf-secrets exists (re-applies the sealed secret manifest)
+      ansible.builtin.command:
+        cmd: kubectl apply -f {{ unifi_tf_dir }}/unifi-tf-sealedsecret.yml
+      changed_when: true
+
+    - name: Build the scratch ConfigMap from the current terraform/ directory
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubectl create configmap {{ unifi_tf_configmap_name }} -n {{ unifi_tf_namespace }} \
+          $(for f in {{ unifi_tf_dir }}/terraform/*.tf; do echo --from-file="$f"; done) \
+          --dry-run=client -o yaml | kubectl apply -f -
+      changed_when: true
+
+    - name: Render the apply Job manifest
+      ansible.builtin.copy:
+        dest: /tmp/{{ unifi_tf_job_name }}.yml
+        mode: "0600"
+        content: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: {{ unifi_tf_job_name }}
+            namespace: {{ unifi_tf_namespace }}
+          spec:
+            backoffLimit: 0
+            activeDeadlineSeconds: 600
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: terraform
+                    image: hashicorp/terraform:1.9.8
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -euo pipefail
+                        cp -r /workspace-ro/. /workspace/
+                        cd /workspace
+                        terraform init -input=false -backend-config="conn_str=${TF_BACKEND_PG_CONN_STR}"
+                        terraform plan -input=false -no-color -out=tfplan | tee plan.txt
+
+                        # Same destroy-guard as the original ArgoCD-hook Job
+                        # (day1-foundation HISTORY.md #5) - preserved exactly,
+                        # just triggered by a human running this playbook
+                        # instead of an automated sync.
+                        destroy_count=$(sed -n 's/^Plan: .*, \([0-9]\{1,\}\) to destroy\..*/\1/p' plan.txt)
+                        destroy_count=${destroy_count:-0}
+                        if [ "${destroy_count}" -gt 0 ] && [ "${UNIFI_TF_ALLOW_DESTROY:-false}" != "true" ]; then
+                          echo "REFUSING TO APPLY: plan would destroy ${destroy_count} resource(s)." >&2
+                          echo "Review the plan above. If the destroy is genuinely intended," >&2
+                          echo "re-run with -e unifi_tf_allow_destroy=true." >&2
+                          exit 1
+                        fi
+
+                        if [ "${UNIFI_TF_DO_APPLY:-false}" != "true" ]; then
+                          echo "=== PLAN-ONLY RUN - re-run with -e unifi_tf_do_apply=true to actually apply ==="
+                          exit 0
+                        fi
+
+                        terraform apply -input=false tfplan
+                    envFrom:
+                      - secretRef:
+                          name: unifi-tf-secrets
+                    env:
+                      - name: UNIFI_TF_ALLOW_DESTROY
+                        value: "{{ unifi_tf_allow_destroy | string | lower }}"
+                      - name: UNIFI_TF_DO_APPLY
+                        value: "{{ unifi_tf_do_apply | string | lower }}"
+                    volumeMounts:
+                      - name: tf-config-ro
+                        mountPath: /workspace-ro
+                        readOnly: true
+                      - name: tf-workspace
+                        mountPath: /workspace
+                volumes:
+                  - name: tf-config-ro
+                    configMap:
+                      name: {{ unifi_tf_configmap_name }}
+                  - name: tf-workspace
+                    # Same NFS/flock issue as cloudflare-tf/the original
+                    # unifi-tf Job: this node's default emptyDir is
+                    # NFS-backed (local_lock=none), which fails flock() with
+                    # ENOLCK - Terraform's state locking needs real file
+                    # locks even with the pg backend. medium: Memory avoids it.
+                    emptyDir:
+                      medium: Memory
+                      sizeLimit: 512Mi
+
+    - name: Remove any previous run of this Job
+      ansible.builtin.command:
+        cmd: kubectl delete job {{ unifi_tf_job_name }} -n {{ unifi_tf_namespace }} --ignore-not-found
+      changed_when: true
+
+    - name: Apply the Job
+      ansible.builtin.command:
+        cmd: kubectl apply -f /tmp/{{ unifi_tf_job_name }}.yml
+      changed_when: true
+
+    - name: Wait for the Job to reach a terminal state
+      # Deliberately NOT .status.conditions[0].type - confirmed live
+      # 2026-08-10 that newer Kubernetes puts "SuccessCriteriaMet"
+      # first in the conditions array, with "Complete" second, so
+      # checking index 0 never matched and looped forever even though
+      # the Job had already finished.
+      #
+      # Also deliberately NOT a combined jsonpath with a literal
+      # separator (e.g. {.status.succeeded}{"/"}{.status.failed}) -
+      # confirmed live 2026-08-10 that ansible.builtin.command doesn't
+      # go through a shell, so its shlex-splitting strips the embedded
+      # quotes before kubectl ever sees them, breaking the jsonpath
+      # syntax outright. Fetching full JSON and parsing with Ansible's
+      # own from_json filter sidesteps the whole class of problem.
+      ansible.builtin.command:
+        cmd: kubectl get job {{ unifi_tf_job_name }} -n {{ unifi_tf_namespace }} -o json
+      register: job_json_raw
+      until: >-
+        (job_json_raw.stdout | from_json).status.succeeded is defined or
+        (job_json_raw.stdout | from_json).status.failed is defined
+      retries: 100
+      delay: 6
+      changed_when: false
+
+    - name: Determine whether the Job succeeded or failed
+      ansible.builtin.set_fact:
+        unifi_tf_job_failed: "{{ (job_json_raw.stdout | from_json).status.failed is defined }}"
+
+    - name: Fetch the Job's plan/apply output
+      ansible.builtin.command:
+        cmd: kubectl logs -n {{ unifi_tf_namespace }} job/{{ unifi_tf_job_name }}
+      register: job_logs
+      changed_when: false
+
+    - name: Show the plan/apply output
+      ansible.builtin.debug:
+        msg: "{{ job_logs.stdout_lines }}"
+
+    - name: Clean up the Job and scratch ConfigMap
+      ansible.builtin.command:
+        cmd: "{{ item }}"
+      loop:
+        - "kubectl delete job {{ unifi_tf_job_name }} -n {{ unifi_tf_namespace }} --ignore-not-found"
+        - "kubectl delete configmap {{ unifi_tf_configmap_name }} -n {{ unifi_tf_namespace }} --ignore-not-found"
+      changed_when: true
+
+    - name: Fail the play if the Job itself failed (destroy-guard tripped, or a real error)
+      ansible.builtin.fail:
+        msg: "{{ unifi_tf_job_name }} failed - see the plan/apply output above for why."
+      when: unifi_tf_job_failed | bool
