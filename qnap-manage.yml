@@ -1,0 +1,57 @@
+################################################################################
+# FILE: qnap-manage.yml
+################################################################################
+# Separate from day0-infra-build.yml deliberately: that playbook's plays
+# manage the cluster nodes' relationship to the QNAP (DNS pins, host
+# mounts - see the "QNAP client storage" play, --tags manage_qnap,
+# still there, still the right home for it since it's referenced
+# externally by that exact invocation). This one manages the QNAP NAS
+# itself over SSH - a genuinely different category of thing, kept in
+# its own file rather than folded into the existing playbook.
+---
+- name: QNAP backup directories
+  hosts: qnap
+  # No Python on the QNAP target (confirmed live 2026-08-07) - the
+  # default implicit fact-gathering step needs it just as much as
+  # file/copy/cron do, and fails before any of this play's own
+  # raw-only tasks get a chance to run. Neither role here uses
+  # gathered facts anyway.
+  gather_facts: false
+  tags:
+    - manage_qnap_backup
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/qnap_backup_directories.yml
+
+  tasks:
+    - name: Ensure backup-stream directories exist with correct ownership
+      ansible.builtin.include_role:
+        name: qnap_backup_dirs
+
+- name: QNAP backup cron
+  hosts: qnap
+  gather_facts: false
+  tags:
+    - manage_qnap_cron
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/qnap_backup_cron.yml
+
+  tasks:
+    - name: Ensure backup cron entries exist in the persistent crontab
+      ansible.builtin.include_role:
+        name: qnap_cron
+
+- name: QNAP NFS export settings
+  hosts: qnap
+  gather_facts: false
+  tags:
+    - manage_qnap_exports
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/qnap_nfs_exports.yml
+
+  tasks:
+    - name: Ensure managed NFS export settings match desired state
+      ansible.builtin.include_role:
+        name: qnap_exports

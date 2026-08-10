@@ -1,0 +1,6 @@
+################################################################################
+# FILE: roles/qnap_exports/tasks/main.yml
+################################################################################
+---
+- name: Include squash-setting tasks
+  ansible.builtin.include_tasks: ensure_squash.yml

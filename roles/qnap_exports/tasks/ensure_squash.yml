@@ -1,0 +1,31 @@
+################################################################################
+# FILE: roles/qnap_exports/tasks/ensure_squash.yml
+################################################################################
+---
+# Check-then-fix rather than a blind sed every run: keeps the "did this
+# actually change" signal honest or the handler would fire (and NFS
+# restart, however brief, would hit) on every single play run
+# regardless of whether anything was wrong.
+- name: Check current squash setting for each managed export
+  ansible.builtin.raw: >-
+    grep -qF '{{ item.path }} = {{ item.value }}' {{ qnap_nfs_config_file }} && echo MATCH || echo MISMATCH
+  loop: "{{ qnap_nfs_squash }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: squash_check
+  changed_when: false
+
+# Range-scoped to the [SquashOption] section specifically
+# (/^\[SquashOption\]/,/^\[/) - the same export path string appears
+# once per section in this file ([Access], [AllowIP], [Permission],
+# [SquashOption], [AnonUID], [AnonGID] all repeat every export path),
+# so an unscoped sed would corrupt the other sections' values for the
+# same path.
+- name: Fix squash setting where it doesn't match desired state
+  ansible.builtin.raw: >-
+    sed -i '/^\[SquashOption\]/,/^\[/{s|^{{ item.item.path }} = .*$|{{ item.item.path }} = {{ item.item.value }}|}' {{ qnap_nfs_config_file }}
+  loop: "{{ squash_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISMATCH' in item.stdout"
+  notify: Restart QNAP NFS service

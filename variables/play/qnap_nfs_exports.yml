@@ -1,0 +1,33 @@
+################################################################################
+# FILE: variables/play/qnap_nfs_exports.yml
+################################################################################
+---
+# The QNAP's own NFS export config, not exportfs/exports(5) - QTS keeps
+# this in a flat ini-style file, one line per export per section
+# ([Access], [AllowIP], [Permission], [SquashOption], [AnonUID],
+# [AnonGID]), reloaded via `/etc/init.d/nfs restart`. Confirmed live
+# 2026-08-08/09. Only managing SquashOption here for now - the one
+# setting that's already bitten this project twice (root_squash denying
+# writes, then all_squash silently remapping every client uid
+# regardless of container securityContext). Extend with the other
+# sections later if a similar need shows up; not built preemptively.
+qnap_nfs_config_file: /etc/config/nfssetting
+
+# path is the file's own local filesystem path for the share (not the
+# NFS export name a client mounts - e.g. /backup as a client-facing
+# path corresponds to /share/external/DEV3302_1 here). value is the
+# exact desired line content, one value per allowed host in [AllowIP]
+# order (currently 2: k8smaster, pinode-01) - matches the file's own
+# comma-separated-per-host format, not a single scalar.
+#
+# no_root_squash chosen deliberately over all_squash: this export needs
+# real per-consumer ownership (the QNAP-side directory owner has to
+# match whatever uid the writing container actually runs as), not
+# every write forced to one fixed uid regardless of who's writing.
+# Confirmed live 2026-08-08 that all_squash was the root cause of
+# kubelet's own pod-level nfs: volume mechanism failing writes here -
+# see day2-services project_qnap_backup_design memory for the full
+# debugging trail.
+qnap_nfs_squash:
+  - path: /share/external/DEV3302_1
+    value: no_root_squash,no_root_squash

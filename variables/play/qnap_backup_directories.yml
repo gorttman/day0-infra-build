@@ -1,0 +1,33 @@
+################################################################################
+# FILE: variables/play/qnap_backup_directories.yml
+################################################################################
+---
+# The USB backup disk's real path on the QNAP's own filesystem - NOT the
+# /backup NFS export path (that only means something to an NFS client;
+# we're running these tasks over SSH directly on the QNAP itself). QNAP
+# names external-storage mounts by device ID rather than share name;
+# confirmed live via `ls /share/external/` (2026-08-07) - re-verify this
+# if the disk is ever unplugged/reconnected, since the ID isn't
+# guaranteed stable across that.
+qnap_backup_disk_root: /share/external/DEV3302_1
+
+# Every subdirectory a backup stream needs under the QNAP /backup export's
+# active_backup/ staging area - never the export root itself, which still
+# has an old, unverified rushed backup sitting on it from before this
+# project existed (see day2-services project_qnap_backup_design memory).
+# Add a stream here and re-run the play - no role/task changes needed.
+#
+# uid/gid: NOT the consuming workload's own uid - confirmed live
+# 2026-08-07 (`grep DEV3302_1 /etc/config/nfssetting`) that /backup's
+# export is `all_squash` with AnonUID=1000/AnonGID=100. all_squash means
+# every client uid gets remapped to that fixed pair, root included - a
+# pod's securityContext.runAsUser never actually reaches the server, so
+# these values must always be 1000:100 for this export regardless of
+# what uid the writing container runs as. (First attempt used the
+# postgres image's own uid, 70:70, which predictably still got denied -
+# root_squash was the wrong mental model here, this export doesn't just
+# squash root, it squashes everyone.)
+qnap_backup_dirs:
+  - path: active_backup/postgres
+    uid: 1000
+    gid: 100
