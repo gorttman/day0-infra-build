@@ -29,12 +29,14 @@ restore.sh - unified restore for QNAP/cluster backups.
 
   restore.sh list                            Show everything restorable right now
   restore.sh postgres [db] [--dry-run]       Restore one db (default: all 7), newest generation
+  restore.sh postgres <db> --to <scratch-db> Restore into a scratch db instead - safe test, no confirmation needed
   restore.sh sealed-secrets [--dry-run]      Stage the newest key backup onto local disk
   restore.sh qnap-data <source> [date] [--dry-run]
                                               Restore a QNAP export (default: newest generation)
+  restore.sh qnap-data <source> --to <path>  Restore into a scratch path instead - safe test, no confirmation needed
 
-Real restores (no --dry-run) ask for confirmation before touching
-anything. Nothing here ever runs unattended or on a schedule.
+Real restores (no --dry-run, no --to) ask for confirmation before
+touching anything. Nothing here ever runs unattended or on a schedule.
 USAGE
 }
 
@@ -145,7 +147,7 @@ confirm() {
 # postgres-backup already uses to WRITE these files, just pointed at
 # reading one back - no new access path, no file transfer needed.
 restore_one_postgres_db() {
-  local db="$1" dryrun="$2"
+  local db="$1" dryrun="$2" target="${3:-$db}"
   local file
   file=$(newest_postgres_file "$db")
   if [ -z "$file" ]; then
@@ -154,12 +156,29 @@ restore_one_postgres_db() {
   fi
   local relpath="${file#"$POSTGRES_BACKUP_DIR"/}"
   echo "[*] $db <- $relpath"
+  if [ "$target" != "$db" ]; then
+    echo "    -> restoring into scratch db '$target', not the live '$db'"
+  fi
   if [ "$dryrun" = "1" ]; then
-    echo "    (dry-run) would run a Job: pg_restore --clean --if-exists -d $db /mnt/backup/active_backup/postgres/$relpath"
+    echo "    (dry-run) would run a Job: pg_restore --clean --if-exists -d $target /mnt/backup/active_backup/postgres/$relpath"
     return 0
   fi
 
-  local job_name="postgres-restore-${db}-$(date +%s)"
+  # When targeting a scratch db (--to), (re)create it first - pg_restore
+  # populates an existing database, it doesn't create one, and Postgres
+  # has no CREATE DATABASE IF NOT EXISTS - so drop-if-exists first makes
+  # repeat test runs against the same scratch name idempotent.
+  local precreate=""
+  if [ "$target" != "$db" ]; then
+    precreate="dropdb --if-exists -h postgres.postgres.svc.cluster.local -U postgres '${target}' && createdb -h postgres.postgres.svc.cluster.local -U postgres -O postgres '${target}' &&"
+  fi
+
+  # Job names are RFC 1123 subdomains - no underscores allowed, and two
+  # of the real db names have one (cloudflare_tf, unifi_tf). Confirmed
+  # live 2026-08-12: this broke on the very first real (non-dry-run)
+  # restore attempted - dry-run mode returns before ever reaching this
+  # line, so the bug was invisible until an actual restore ran.
+  local job_name="postgres-restore-$(echo "${target}" | tr '_' '-')-$(date +%s)"
   cat <<EOF | kubectl apply -f -
 apiVersion: batch/v1
 kind: Job
@@ -180,7 +199,7 @@ spec:
       containers:
         - name: postgres-restore
           image: postgres:16.9-alpine
-          command: ["pg_restore", "--clean", "--if-exists", "-h", "postgres.postgres.svc.cluster.local", "-U", "postgres", "-d", "${db}", "/mnt/backup/active_backup/postgres/${relpath}"]
+          command: ["/bin/sh", "-c", "${precreate} pg_restore --clean --if-exists -h postgres.postgres.svc.cluster.local -U postgres -d ${target} /mnt/backup/active_backup/postgres/${relpath}"]
           env:
             - name: PGPASSWORD
               valueFrom:
@@ -217,7 +236,7 @@ restore_postgres_globals() {
     return 0
   fi
 
-  local job_name="postgres-restore-globals-$(date +%s)"
+  local job_name="postgres-restore-globals-$(date +%s)"  # no underscores in "globals" but kept consistent with the db-name path above
   cat <<EOF | kubectl apply -f -
 apiVersion: batch/v1
 kind: Job
@@ -261,13 +280,20 @@ EOF
 }
 
 cmd_postgres() {
-  local db="all" dryrun=0
-  for arg in "$@"; do
-    case "$arg" in
+  local db="all" dryrun=0 target=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
       --dry-run) dryrun=1 ;;
-      *) db="$arg" ;;
+      --to) shift; target="$1" ;;
+      *) db="$1" ;;
     esac
+    shift
   done
+
+  if [ -n "$target" ] && [ "$db" = "all" ]; then
+    echo "--to needs a single database name, not 'all'" >&2
+    exit 1
+  fi
 
   if [ "$db" = "all" ]; then
     if [ "$dryrun" != "1" ]; then
@@ -278,10 +304,10 @@ cmd_postgres() {
       restore_one_postgres_db "$name" "$dryrun"
     done <<< "$(postgres_db_names)"
   else
-    if [ "$dryrun" != "1" ]; then
+    if [ -z "$target" ] && [ "$dryrun" != "1" ]; then
       confirm "This will overwrite the live '$db' database with its newest backup." || { echo "Aborted."; exit 1; }
     fi
-    restore_one_postgres_db "$db" "$dryrun"
+    restore_one_postgres_db "$db" "$dryrun" "${target:-$db}"
   fi
 }
 
@@ -323,17 +349,19 @@ cmd_sealed_secrets() {
 # that could remove something live that's newer than the chosen
 # generation.
 cmd_qnap_data() {
-  local source="${1:-}" date="" dryrun=0
+  local source="${1:-}" date="" dryrun=0 target=""
   shift || true
-  for arg in "$@"; do
-    case "$arg" in
+  while [ $# -gt 0 ]; do
+    case "$1" in
       --dry-run) dryrun=1 ;;
-      *) date="$arg" ;;
+      --to) shift; target="$1" ;;
+      *) date="$1" ;;
     esac
+    shift
   done
 
   if [ -z "$source" ] || [ -z "${RESTORE_TARGETS[$source]+x}" ]; then
-    echo "Usage: restore.sh qnap-data <source> [date] [--dry-run]" >&2
+    echo "Usage: restore.sh qnap-data <source> [date] [--to <path>] [--dry-run]" >&2
     echo "Known sources: ${!RESTORE_TARGETS[*]}" >&2
     exit 1
   fi
@@ -342,7 +370,7 @@ cmd_qnap_data() {
     date=$(ls -1t "$QNAP_SNAPSHOT_DIR/daily" 2>/dev/null | head -1)
   fi
   local src_dir="$QNAP_SNAPSHOT_DIR/daily/$date/$source"
-  local dest_dir="${RESTORE_TARGETS[$source]}"
+  local dest_dir="${target:-${RESTORE_TARGETS[$source]}}"
 
   if [ ! -d "$src_dir" ]; then
     echo "No snapshot found at $src_dir" >&2
@@ -350,7 +378,7 @@ cmd_qnap_data() {
   fi
 
   echo "[*] $source <- $src_dir"
-  echo "    ->  $dest_dir"
+  echo "    ->  $dest_dir$([ -n "$target" ] && echo " (scratch target, not the live export)")"
   if [ "$dryrun" = "1" ]; then
     # rsync piped straight into head risks SIGPIPE on a large source
     # (e.g. books' 152,028 files) once head closes early - pipefail
@@ -360,7 +388,11 @@ cmd_qnap_data() {
     return 0
   fi
 
-  confirm "This will restore '$source' from the $date snapshot onto the live export ($dest_dir)." || { echo "Aborted."; exit 1; }
+  if [ -z "$target" ]; then
+    confirm "This will restore '$source' from the $date snapshot onto the live export ($dest_dir)." || { echo "Aborted."; exit 1; }
+  else
+    mkdir -p "$dest_dir"
+  fi
   rsync -a "$src_dir/" "$dest_dir/"
   echo "Done."
 }
