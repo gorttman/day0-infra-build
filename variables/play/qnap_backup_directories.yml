@@ -40,3 +40,13 @@ qnap_backup_dirs:
   - path: active_backup/postgres
     uid: 70
     gid: 70
+  # pihole's gravity-backup sidecar and calibre-web's config-backup
+  # sidecar are both plain busybox containers with no securityContext -
+  # confirmed live 2026-08-10 (grep for securityContext in each
+  # deployment) - so both run as literal root, uid/gid 0:0.
+  - path: active_backup/pihole
+    uid: 0
+    gid: 0
+  - path: active_backup/calibre-web
+    uid: 0
+    gid: 0
