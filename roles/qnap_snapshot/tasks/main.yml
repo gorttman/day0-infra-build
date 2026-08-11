@@ -1,0 +1,6 @@
+################################################################################
+# FILE: roles/qnap_snapshot/tasks/main.yml
+################################################################################
+---
+- name: Include script-push tasks
+  ansible.builtin.include_tasks: push_script.yml

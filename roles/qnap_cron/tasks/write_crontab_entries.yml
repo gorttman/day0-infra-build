@@ -8,12 +8,21 @@
 # gives no structured state to check against - each entry's `name`
 # becomes a trailing crontab comment, and the append is skipped if a
 # line carrying that comment already exists.
+#
+# Explicit ADDED/PRESENT markers rather than changed_when: true -
+# confirmed live 2026-08-10 that an unconditional changed_when fired
+# the crontab-reload handler on every single run regardless of whether
+# anything was actually appended, even though the grep guard itself
+# was correctly preventing duplicates. Harmless here (a crontab reload
+# doesn't interrupt anything, unlike qnap_exports' NFS restart), but
+# still an inaccurate changed status worth fixing rather than leaving.
 - name: Ensure each cron entry exists in the persistent crontab file
   ansible.builtin.raw: >-
-    grep -qF '# {{ item.name }}' {{ qnap_crontab_file }} 2>/dev/null ||
-    echo '{{ item.schedule }} {{ item.command }} # {{ item.name }}' >> {{ qnap_crontab_file }}
+    grep -qF '# {{ item.name }}' {{ qnap_crontab_file }} 2>/dev/null &&
+    echo PRESENT || { echo '{{ item.schedule }} {{ item.command }} # {{ item.name }}' >> {{ qnap_crontab_file }}; echo ADDED; }
   loop: "{{ qnap_cron_jobs }}"
   loop_control:
     label: "{{ item.name }}"
-  changed_when: true
+  register: cron_entry_check
+  changed_when: "'ADDED' in cron_entry_check.stdout"
   notify: Reload QNAP crontab

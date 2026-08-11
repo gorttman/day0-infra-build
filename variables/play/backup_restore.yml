@@ -1,0 +1,29 @@
+################################################################################
+# FILE: variables/play/backup_restore.yml
+################################################################################
+---
+# Runs on k8smaster (real Python there - confirmed, unlike the QNAP -
+# so this play uses the normal template module, not the raw+heredoc
+# workaround every QNAP-hosted role needs).
+backup_restore_script_path: /usr/local/bin/restore.sh
+
+# Where each backup stream actually lives, all reachable from k8smaster
+# via existing mounts - no new mounts needed for this role.
+postgres_backup_dir: /mnt/backup/active_backup/postgres
+qnap_snapshot_backup_dir: /mnt/backup/active_backup/qnap-data
+credentials_backup_dir: /mnt/backup/k8smaster-credentials
+# Where the sealed-secrets restore stages a key to - the EXISTING
+# restore_sealed_secrets_key.yml task (roles/apply_bootstrap) already
+# reads from here; restore.sh's job is only to get the QNAP copy onto
+# local disk, not to duplicate that task's own kubectl-apply logic.
+local_credentials_dir: "{{ playbook_dir }}/credentials"
+
+# Live export mount points restore targets write back to - same paths
+# roles/qnap_client's qnap_host_mounts already manages.
+qnap_snapshot_restore_targets:
+  books: /mnt/books
+  vault: /mnt/vault
+  immich: /mnt/immich
+  paperless: /mnt/paperless
+  inbox: /mnt/inbox
+  media: /mnt/media

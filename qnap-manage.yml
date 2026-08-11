@@ -35,6 +35,11 @@
     - manage_qnap_cron
   vars_files:
     - variables/common/set_environment.yml
+    # qnap_snapshot.yml supplies qnap_snapshot_script_path, referenced
+    # by the qnap-data-snapshot cron entry below - each play has its
+    # own isolated vars_files scope, so this has to be included here
+    # too, not just in the snapshot play itself.
+    - variables/play/qnap_snapshot.yml
     - variables/play/qnap_backup_cron.yml
 
   tasks:
@@ -55,3 +60,21 @@
     - name: Ensure managed NFS export settings match desired state
       ansible.builtin.include_role:
         name: qnap_exports
+
+- name: QNAP data snapshot script
+  hosts: qnap
+  gather_facts: false
+  tags:
+    - manage_qnap_snapshot
+  vars_files:
+    - variables/common/set_environment.yml
+    # qnap_backup_directories.yml supplies qnap_backup_disk_root - the
+    # single source of truth for the disk's real path, shared with the
+    # backup-directories play rather than duplicated here.
+    - variables/play/qnap_backup_directories.yml
+    - variables/play/qnap_snapshot.yml
+
+  tasks:
+    - name: Ensure the snapshot script is pushed and current
+      ansible.builtin.include_role:
+        name: qnap_snapshot

@@ -1,0 +1,13 @@
+################################################################################
+# FILE: roles/backup_restore/tasks/main.yml
+################################################################################
+---
+# Unlike every QNAP-hosted role in this repo, this one runs on
+# k8smaster - real Python there, so the normal template module works,
+# no raw+heredoc workaround needed.
+- name: Deploy restore.sh
+  ansible.builtin.template:
+    src: restore.sh.j2
+    dest: "{{ backup_restore_script_path }}"
+    mode: "0755"
+  become: true

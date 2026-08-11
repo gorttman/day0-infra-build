@@ -1,0 +1,47 @@
+################################################################################
+# FILE: variables/play/qnap_snapshot.yml
+################################################################################
+---
+qnap_snapshot_script_path: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.sh
+
+# Retention matches the DB backups' scheme (7 daily / 4 weekly / 13
+# monthly - 12 completed months + the current in-progress one) for a
+# consistent restore.sh mental model, not because the two datasets
+# change at the same rate.
+qnap_snapshot_daily_keep: 7
+qnap_snapshot_weekly_keep: 4
+qnap_snapshot_monthly_keep: 13
+
+# Source list finalized 2026-08-10 (see day2-services
+# project_qnap_backup_design memory for the full reasoning trail).
+# Deliberately excludes: /backup itself (it's the destination disk,
+# /share/external/DEV3302_1 - confirmed the same physical device,
+# snapshotting it onto itself makes no sense), the top-level /downloads
+# export and media's own downloads/ subdirectory (both in-progress
+# staging, confirmed genuinely separate directories via inode
+# comparison, not aliases of each other), /cold and /Public (never
+# proposed).
+#
+# path is each export's real *local* filesystem path on the QNAP -
+# confirmed live via SSH, not assumed from the client-facing NFS
+# export name. immich's is a genuine surprise: the QNAP's own local
+# directory is misspelled "immicc", not "immich" - the NFS export name
+# clients mount is correctly spelled, only the underlying directory
+# isn't. Left as-is rather than renamed, since renaming a live,
+# already-exported directory is a separate, riskier change than this
+# backup job needs to make.
+qnap_snapshot_sources:
+  - name: books
+    path: /share/CACHEDEV1_DATA/books
+  - name: vault
+    path: /share/CACHEDEV1_DATA/vault
+  - name: immich
+    path: /share/CACHEDEV1_DATA/immicc
+  - name: paperless
+    path: /share/CACHEDEV1_DATA/paperless
+  - name: inbox
+    path: /share/CACHEDEV1_DATA/inbox
+  - name: media
+    path: /share/CACHEDEV1_DATA/media
+    excludes:
+      - downloads
