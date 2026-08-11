@@ -129,3 +129,24 @@
     - name: Configure QNAP NAS resolution and mounts
       ansible.builtin.include_role:
         name: qnap_client
+
+# Deliberately in this playbook, not qnap-manage.yml - that one is
+# specifically for managing the QNAP NAS itself over SSH (see its own
+# header comment). restore.sh runs on k8smaster, needs kubectl and the
+# same host-level QNAP mounts qnap_client manages above, and has real
+# Python available (unlike the QNAP), so it uses the normal template
+# module rather than the raw+heredoc pattern every QNAP-hosted role
+# needs. Still part of the same QNAP-backup automation family in
+# naming/intent, just a different host.
+- name: Backup restore tooling
+  hosts: all
+  become: true
+  tags:
+    - manage_backup_restore
+  vars_files:
+    - variables/play/backup_restore.yml
+
+  tasks:
+    - name: Deploy the unified restore.sh
+      ansible.builtin.include_role:
+        name: backup_restore
