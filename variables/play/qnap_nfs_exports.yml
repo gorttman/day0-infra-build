@@ -31,3 +31,31 @@ qnap_nfs_config_file: /etc/config/nfssetting
 qnap_nfs_squash:
   - path: /share/external/DEV3302_1
     value: no_root_squash,no_root_squash
+  - path: /share/CACHEDEV1_DATA/pihole
+    value: no_root_squash,no_root_squash
+  - path: /share/CACHEDEV1_DATA/calibre-web
+    value: no_root_squash,no_root_squash
+
+# New exports created from scratch (roles/qnap_exports/tasks/create_export.yml),
+# as opposed to qnap_nfs_squash above which only ever modifies a setting
+# on an export that already exists. Modeled directly on the existing
+# paperless/media entries - plain two-host (k8smaster, pinode-01),
+# no_root_squash, unmapped-uid exports. Once created here, both are also
+# listed in qnap_nfs_squash above so ensure_squash.yml keeps enforcing
+# their squash setting long-term, the same as every other managed export.
+#
+# pihole and calibre-web moving off the backup disk's active_backup/ and
+# onto the main pool - see variables/play/qnap_main_pool_dirs.yml for why.
+qnap_nfs_new_exports:
+  - path: /share/CACHEDEV1_DATA/pihole
+    allow_ip: "192.168.1.10,192.168.1.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/calibre-web
+    allow_ip: "192.168.1.10,192.168.1.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"

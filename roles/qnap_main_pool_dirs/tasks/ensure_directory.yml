@@ -1,0 +1,17 @@
+################################################################################
+# FILE: roles/qnap_main_pool_dirs/tasks/ensure_directory.yml
+################################################################################
+---
+# Same raw-not-file rationale as roles/qnap_backup_dirs/tasks/ensure_directory.yml -
+# no confirmed Python on the QNAP target. This role is the main-pool
+# counterpart: directories under qnap_main_pool_root (the QNAP's
+# internal storage pool, not the USB backup disk) for workloads that
+# need real live storage on the QNAP rather than a spot on the backup
+# disk itself.
+- name: Ensure each main-pool workload's directory exists
+  ansible.builtin.raw: >-
+    mkdir -p '{{ qnap_main_pool_root }}/{{ item.path }}'
+  loop: "{{ qnap_main_pool_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: true

@@ -1,0 +1,83 @@
+################################################################################
+# FILE: roles/qnap_exports/tasks/create_export.yml
+################################################################################
+---
+# Creates a brand-new NFS export from scratch, as opposed to
+# ensure_squash.yml which only ever modifies a setting on an export that
+# already exists. Every export in this file's six sections ([Access],
+# [AllowIP], [Permission], [SquashOption], [AnonUID], [AnonGID]) repeats
+# the same path once per section - to add a new export, one line has to
+# land in all six, or the file is left inconsistent (e.g. an export with
+# a [SquashOption] line but no [AnonUID] line, which is exactly the kind
+# of malformed state that risks the QNAP's whole NFS service, not just
+# this one export - see the handler's own warning).
+#
+# Modeled directly on the paperless/media entries - a plain two-host
+# (k8smaster, pinode-01), no_root_squash, unmapped-uid export, the same
+# shape this project has already proven safe for real workload traffic.
+#
+# grep -qF check before each insert, same idempotency idiom as
+# ensure_squash.yml's MATCH/MISMATCH: safe to re-run, and the handler
+# only fires when something actually changed.
+- name: Check whether each new export already exists in [Access]
+  ansible.builtin.raw: >-
+    grep -qF '{{ item.path }} = TRUE' {{ qnap_nfs_config_file }} && echo PRESENT || echo MISSING
+  loop: "{{ qnap_nfs_new_exports }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: export_check
+  changed_when: false
+
+- name: Insert Access line for missing exports
+  ansible.builtin.raw: >-
+    sed -i '/^\[Access\]/a {{ item.item.path }} = TRUE' {{ qnap_nfs_config_file }}
+  loop: "{{ export_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISSING' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Insert AllowIP line for missing exports
+  ansible.builtin.raw: >-
+    sed -i '/^\[AllowIP\]/a {{ item.item.path }} = {{ item.item.allow_ip }}' {{ qnap_nfs_config_file }}
+  loop: "{{ export_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISSING' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Insert Permission line for missing exports
+  ansible.builtin.raw: >-
+    sed -i '/^\[Permission\]/a {{ item.item.path }} = {{ item.item.permission }}' {{ qnap_nfs_config_file }}
+  loop: "{{ export_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISSING' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Insert SquashOption line for missing exports
+  ansible.builtin.raw: >-
+    sed -i '/^\[SquashOption\]/a {{ item.item.path }} = {{ item.item.squash }}' {{ qnap_nfs_config_file }}
+  loop: "{{ export_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISSING' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Insert AnonUID line for missing exports
+  ansible.builtin.raw: >-
+    sed -i '/^\[AnonUID\]/a {{ item.item.path }} = {{ item.item.anon_uid }}' {{ qnap_nfs_config_file }}
+  loop: "{{ export_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISSING' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Insert AnonGID line for missing exports
+  ansible.builtin.raw: >-
+    sed -i '/^\[AnonGID\]/a {{ item.item.path }} = {{ item.item.anon_gid }}' {{ qnap_nfs_config_file }}
+  loop: "{{ export_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISSING' in item.stdout"
+  notify: Restart QNAP NFS service

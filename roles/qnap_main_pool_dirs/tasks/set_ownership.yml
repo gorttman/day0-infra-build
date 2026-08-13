@@ -1,0 +1,14 @@
+################################################################################
+# FILE: roles/qnap_main_pool_dirs/tasks/set_ownership.yml
+################################################################################
+---
+# -R for the same reason as roles/qnap_backup_dirs/tasks/set_ownership.yml -
+# a workload's own mkdir -p under this directory later would otherwise
+# keep a stale owner if this only fixed the top level.
+- name: Ensure each main-pool workload's directory has the correct owner
+  ansible.builtin.raw: >-
+    chown -R {{ item.uid }}:{{ item.gid }} '{{ qnap_main_pool_root }}/{{ item.path }}'
+  loop: "{{ qnap_main_pool_dirs }}"
+  loop_control:
+    label: "{{ item.path }} -> {{ item.uid }}:{{ item.gid }}"
+  changed_when: true

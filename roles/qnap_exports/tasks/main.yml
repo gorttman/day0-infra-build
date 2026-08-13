@@ -2,5 +2,11 @@
 # FILE: roles/qnap_exports/tasks/main.yml
 ################################################################################
 ---
+# Runs before ensure_squash.yml deliberately: a new export needs to
+# exist across all six sections before there's anything for
+# ensure_squash.yml to check or fix on it.
+- name: Include export-creation tasks
+  ansible.builtin.include_tasks: create_export.yml
+
 - name: Include squash-setting tasks
   ansible.builtin.include_tasks: ensure_squash.yml

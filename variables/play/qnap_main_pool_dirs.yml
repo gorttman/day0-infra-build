@@ -1,0 +1,32 @@
+################################################################################
+# FILE: variables/play/qnap_main_pool_dirs.yml
+################################################################################
+---
+# The QNAP's internal storage pool - where books/vault/immich/paperless/
+# inbox/media already live, and get the daily 7/4/13 generational
+# snapshot (see roles/qnap_snapshot). Distinct from qnap_backup_disk_root
+# (variables/play/qnap_backup_directories.yml), which is the USB backup
+# disk itself - a directory here is a live source the snapshot job backs
+# up FROM, not a backup destination.
+qnap_main_pool_root: /share/CACHEDEV1_DATA
+
+# pihole and calibre-web previously lived under active_backup/ on the
+# backup disk itself (see variables/play/qnap_backup_directories.yml) -
+# which meant their only copy sat inside the one directory tree the
+# snapshot job deliberately excludes (it can't back up the backup disk
+# into itself), so neither had any generational history. Moving them
+# here gives them the same real live/backup separation every other app
+# already has: live data on the main pool, generations on the backup
+# disk.
+#
+# uid/gid 0:0 for both, matching variables/play/qnap_backup_directories.yml's
+# same values for the same two apps - pihole's gravity-backup sidecar and
+# calibre-web's config-backup sidecar are both plain busybox containers
+# with no securityContext, so both run as literal root.
+qnap_main_pool_dirs:
+  - path: pihole
+    uid: 0
+    gid: 0
+  - path: calibre-web
+    uid: 0
+    gid: 0

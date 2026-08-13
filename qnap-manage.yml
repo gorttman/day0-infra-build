@@ -28,6 +28,20 @@
       ansible.builtin.include_role:
         name: qnap_backup_dirs
 
+- name: QNAP main pool directories
+  hosts: qnap
+  gather_facts: false
+  tags:
+    - manage_qnap_main_pool_dirs
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/qnap_main_pool_dirs.yml
+
+  tasks:
+    - name: Ensure main-pool workload directories exist with correct ownership
+      ansible.builtin.include_role:
+        name: qnap_main_pool_dirs
+
 - name: QNAP backup cron
   hosts: qnap
   gather_facts: false
