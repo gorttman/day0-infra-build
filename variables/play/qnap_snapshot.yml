@@ -45,3 +45,13 @@ qnap_snapshot_sources:
     path: /share/CACHEDEV1_DATA/media
     excludes:
       - downloads
+  # Added 2026-08-13 - both previously lived under active_backup/ on
+  # /backup itself (the excluded destination disk above), so neither
+  # had any generational history. Moved to the main pool
+  # (variables/play/qnap_main_pool_dirs.yml,
+  # variables/play/qnap_nfs_exports.yml) specifically so they'd land
+  # here like every other source.
+  - name: pihole
+    path: /share/CACHEDEV1_DATA/pihole
+  - name: calibre-web
+    path: /share/CACHEDEV1_DATA/calibre-web

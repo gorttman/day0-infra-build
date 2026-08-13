@@ -27,3 +27,5 @@ qnap_snapshot_restore_targets:
   paperless: /mnt/paperless
   inbox: /mnt/inbox
   media: /mnt/media
+  pihole: /mnt/pihole
+  calibre-web: /mnt/calibre-web
