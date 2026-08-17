@@ -458,6 +458,41 @@
   become: true
   run_once: true
 
+# Confirmed missing 2026-08-17: this fix has existed since 2026-08-07
+# (see nfs_netboot's setup_dns_overlay.yml for the full incident it
+# fixes - a NetworkManager resolv.conf-ownership misdetection that
+# leaves /etc/resolv.conf empty on a cold boot, cascading into broken
+# DNS/NTP/clock/k3s-TLS) but was only ever applied via that role's
+# per-node /etc overlay mechanism, which is NFS-mode-specific and has
+# no equivalent for a node booting straight from this golden tree.
+# Checked live: pinode-01's current iSCSI root has the same bare
+# NetworkManager.conf the un-fixed golden tree has, meaning this exact
+# bug has been sitting latent on it since the switch to iSCSI-root,
+# never yet triggered by a real cold power-cycle. Fixed here instead of
+# (or in addition to) the overlay mechanism because this content is
+# generic, not per-node - baking it into the shared tree once covers
+# every current and future node under either boot mode, rather than
+# needing a second, iSCSI-specific copy of the same fix maintained in
+# parallel.
+#
+# Deliberately narrower than the NFS-overlay version of this fix: that
+# one also forces global-dns to 8.8.8.8/1.1.1.1, which predates and
+# conflicts with the split-horizon (pihole-first) DNS design settled on
+# since - forcing public resolvers here would bypass pihole for every
+# internal name. The actual bug this fixes is specifically "resolv.conf
+# left empty," not "which servers it points at" - DHCP-supplied DNS
+# already works correctly once it isn't being wiped on every cold boot.
+- name: Fix NetworkManager resolv.conf ownership detection in the golden tree (see comment above)
+  ansible.builtin.blockinfile:
+    path: "{{ nfs_os_path }}/etc/NetworkManager/NetworkManager.conf"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - resolv.conf cold-boot fix"
+    insertafter: "^plugins="
+    block: |
+      dns=default
+      rc-manager=file
+  become: true
+  run_once: true
+
 # `-u` (update) only regenerates initrds that already exist - it does
 # NOT create one for a kernel that's never had one, which is exactly
 # the newly-installed kernel's situation here: INITRD=No (used

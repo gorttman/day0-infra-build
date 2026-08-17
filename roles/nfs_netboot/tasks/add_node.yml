@@ -6,34 +6,80 @@
 #   1. Boot the new Pi — it sends DHCPDISCOVER on the backend VLAN
 #   2. Run: ansible-playbook day0-infra-build.yml --tags manage_nodes
 #   3. Reboot the new Pi — it netboots and joins the cluster
+#
+# Defaults to the single-session iSCSI-root design (see
+# roles/iscsi_netboot/README.md and homelab-book chapter 7) - proven
+# stable this session after replacing the two-target overlay design
+# that preceded it, and avoids the whole class of NFS-root /etc-overlay
+# machinery below entirely for a brand new node. Rewritten 2026-08-17:
+# every new node used to go through the NFS-root path unconditionally,
+# which is now the historical/legacy option, not the default.
+#
+# Pass -e boot_mode=nfs to get the old NFS-root path instead - kept
+# working, not removed. NFS-root nodes still need the same TFTP
+# base/registration steps below, just a different root-provisioning
+# tail.
 
 - name: Discover new nodes from dhcpd logs
   ansible.builtin.include_tasks: discover_nodes.yml
 
-- name: Create NFS cluster storage for new nodes
-  ansible.builtin.include_tasks: configure_node_storage.yml
-  vars:
-    nodes: "{{ new_nodes }}"
-
-- name: Set up rsyslog overlay for new nodes
-  ansible.builtin.include_tasks: setup_rsyslog_overlay.yml
-  vars:
-    nodes: "{{ new_nodes }}"
-
-- name: Set up DNS overlay for new nodes
-  ansible.builtin.include_tasks: setup_dns_overlay.yml
-  vars:
-    nodes: "{{ new_nodes }}"
-
-- name: Set up k3s agent join config for new nodes
-  ansible.builtin.include_tasks: setup_k3s_agent_overlay.yml
-  vars:
-    nodes: "{{ new_nodes }}"
-
-- name: Set up TFTP boot structure for new nodes
+- name: Set up shared TFTP boot structure for new nodes (kernel/initramfs/config.txt - identical either boot mode)
   ansible.builtin.include_tasks: setup_tftp_structure.yml
   vars:
     nodes: "{{ new_nodes }}"
 
 - name: Register new nodes in dhcpd-conf repo
   ansible.builtin.include_tasks: register_dhcp.yml
+
+# --- NFS-root path: explicit override only (-e boot_mode=nfs) ---
+- name: Provision NFS-root boot for new nodes (explicit override only)
+  when: (boot_mode | default('iscsi')) == 'nfs'
+  block:
+    - name: Create NFS cluster storage for new nodes
+      ansible.builtin.include_tasks: configure_node_storage.yml
+      vars:
+        nodes: "{{ new_nodes }}"
+
+    - name: Set up rsyslog overlay for new nodes
+      ansible.builtin.include_tasks: setup_rsyslog_overlay.yml
+      vars:
+        nodes: "{{ new_nodes }}"
+
+    - name: Set up DNS overlay for new nodes
+      ansible.builtin.include_tasks: setup_dns_overlay.yml
+      vars:
+        nodes: "{{ new_nodes }}"
+
+    - name: Set up k3s agent join config for new nodes
+      ansible.builtin.include_tasks: setup_k3s_agent_overlay.yml
+      vars:
+        nodes: "{{ new_nodes }}"
+
+# --- iSCSI single-session-root path: the default ---
+# convert_node.yml already does everything one node needs (LUN/target
+# provisioning, root population from the golden tree, cmdline render) -
+# looped here once per node discover_nodes.yml found. Crossing into
+# iscsi_netboot via include_role (not include_tasks) deliberately - that
+# role's own defaults/main.yml supplies every var this needs (QNAP
+# portal, LUN naming/capacity, and now node_initiator_iqn, computed
+# automatically from node_name) without this file needing to know or
+# duplicate any of it. k3s join config and DNS/rsyslog need no
+# equivalent step here: populate_node_root_lun.yml already writes
+# config.yaml with the correct node-ip directly onto the node's own
+# root, and the DNS cold-boot fix plus rsyslog forwarding are baked
+# into the golden tree itself (install_iscsi_initiator.yml), so every
+# iSCSI node inherits both for free via the same rsync that populates
+# everything else.
+- name: Provision each new node onto the single-session iSCSI root (default)
+  when: (boot_mode | default('iscsi')) == 'iscsi'
+  ansible.builtin.include_role:
+    name: iscsi_netboot
+    tasks_from: convert_node
+  loop: "{{ new_nodes }}"
+  loop_control:
+    loop_var: new_node
+    label: "{{ new_node.name }}"
+  vars:
+    node_name: "{{ new_node.name }}"
+    node_mac_suffix: "{{ new_node.mac_suffix }}"
+    node_ip: "{{ new_node.ip }}"
