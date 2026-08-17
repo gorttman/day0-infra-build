@@ -1,0 +1,230 @@
+---
+# Ensures the shared golden-image target/LUN exist on the QNAP, then
+# writes whatever squashfs build_golden_image.yml just produced onto it.
+#
+# This target is intentionally left open to any initiator (no per-node
+# ACL) - it's the shared read-only image every node mounts, same trust
+# model as the existing NFS export today. Per-node writable LUNs
+# (provision_node_lun.yml) are the ones that get a real ACL.
+#
+# run_once: true throughout - `hosts: all` in this inventory resolves
+# to both `k8smaster` and `localhost` (the same physical machine) - see
+# install_iscsi_initiator.yml's header comment for how double-execution
+# was found and confirmed as a real bug, not a hypothetical.
+#
+# become: false on every qnap-delegated task - the play sets
+# `become: true` at the play level (needed for the apt/iscsiadm/dd tasks
+# against k8smaster below), which becomes the default even for delegated
+# tasks. QNAP's admin account can't sudo to root (confirmed 2026-08-12:
+# "sudo: unknown user: root") - qcli_iscsi has never needed it, same as
+# every other qnap_* role in this project using the raw+no-become
+# pattern.
+
+- name: Log in to QCLI
+  ansible.builtin.include_tasks: qcli_login.yml
+  run_once: true
+
+- name: Check existing targets
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: golden_target_check
+  changed_when: false
+
+- name: Create golden image target
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -C Alias={{ iscsi_golden_target_name }} Name={{ iscsi_golden_target_name }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: iscsi_golden_target_name not in golden_target_check.stdout
+  changed_when: true
+
+- name: Check existing LUNs
+  ansible.builtin.raw: /sbin/qcli_iscsi -l
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: golden_lun_check
+  changed_when: false
+
+# File-based, not Block: this NAS's pool has 0 Bytes free at the pool
+# level (one static volume already claims all of it) - see role
+# defaults for the full explanation. Block allocation fails outright.
+#
+# Allocation=Instant, not the default Thin: confirmed 2026-08-12 that a
+# Thin-provisioned file-based LUN on this QNAP never gets exposed as a
+# SCSI block device to the initiator at all - target shows Map=yes and
+# Status=Connected, iscsiadm logs in successfully, but `iscsiadm -m
+# session -P 3` shows an empty "Attached SCSI devices" list and no
+# /dev/sdX ever appears, even after --rescan or a full logout/login
+# cycle. Switching to Instant allocation and recreating the exact same
+# LUN fixed it immediately (device appeared within seconds of login).
+# Not yet understood why Thin specifically breaks this - just confirmed
+# it does, on this NAS, with this QTS version.
+- name: Create golden image LUN
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -c Name={{ iscsi_golden_lun_name }}
+    Capacity={{ iscsi_golden_lun_capacity_gb }}
+    Allocation=Instant
+    LUNType=File volumeID={{ qnap_iscsi_volume_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: iscsi_golden_lun_name not in golden_lun_check.stdout
+  changed_when: true
+
+- name: Re-check target info to find the golden target's ID
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: golden_target_list
+  changed_when: false
+
+- name: Re-check LUN info to find the golden LUN's ID
+  ansible.builtin.raw: /sbin/qcli_iscsi -l
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: golden_lun_list
+  changed_when: false
+
+- name: Extract golden target ID
+  ansible.builtin.set_fact:
+    golden_target_id: >-
+      {{ golden_target_list.stdout
+         | regex_search('targetID\s+(\d+)\s*\n\s*TargetIQN\s+\S*' + iscsi_golden_target_name, '\1')
+         | first }}
+  run_once: true
+
+- name: Extract golden LUN ID
+  ansible.builtin.set_fact:
+    golden_lun_id: >-
+      {{ golden_lun_list.stdout
+         | regex_search('(\d+)\s+--\s+\S+\s+--\s+' + iscsi_golden_lun_name, '\1')
+         | first }}
+  run_once: true
+
+# QTS auto-generates the IQN suffix (e.g. .bbeed9) on target creation -
+# it isn't predictable ahead of time, so it's read back here rather than
+# reconstructed.
+#
+# Anchored to the golden target's own name, not a bare first-match -
+# an unanchored regex_search silently grabs whichever target is listed
+# first once more than one target exists (a real bug, found and fixed
+# 2026-08-12 in provision_node_lun.yml's equivalent step - same fix
+# applied here for the same reason, even though this one happened to
+# work by luck while the golden target was still the only one on the
+# QNAP).
+- name: Extract the golden target's real IQN
+  ansible.builtin.set_fact:
+    golden_target_iqn: >-
+      {{ (golden_target_list.stdout
+          | regex_search('TargetIQN\s+(\S*' + iscsi_golden_target_name + '\S*)', '\1'))
+          | first }}
+  run_once: true
+
+# The task name above claiming this was idempotent was wrong - confirmed
+# 2026-08-15 the hard way, same bug as provision_node_lun.yml's
+# equivalent step (found and fixed there first): qcli_iscsi -m creates a
+# new lun_N configfs entry every time it's called regardless of whether
+# this exact LUN is already mapped to this exact target. This rebuild
+# alone left 19 stale duplicates on the golden target (cleaned up by
+# hand via direct configfs surgery, same technique as the node-LUN
+# incident) before this guard existed. Same fix applied here.
+- name: Check whether the golden LUN is already mapped to its target
+  ansible.builtin.raw: /sbin/qcli_iscsi -I targetID={{ golden_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: golden_lun_mapping_check
+  changed_when: false
+
+- name: Map golden LUN to golden target (skipped if already mapped)
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -m lunID={{ golden_lun_id }} targetID={{ golden_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: >-
+    not (golden_lun_mapping_check.stdout
+         | regex_search('LunID\s+' + golden_lun_id + '(\s|$)', multiline=True))
+  changed_when: true
+
+- name: Ensure open-iscsi is installed on k8smaster (needed to publish the image)
+  ansible.builtin.apt:
+    name: open-iscsi
+    state: present
+  become: true
+  run_once: true
+
+- name: Discover the golden target from k8smaster (wired portal only)
+  ansible.builtin.command:
+    cmd: "iscsiadm -m discovery -t sendtargets -p {{ qnap_iscsi_portal }}"
+  become: true
+  run_once: true
+  changed_when: true
+
+- name: Log in to the golden target from k8smaster
+  ansible.builtin.command:
+    cmd: >-
+      iscsiadm -m node --targetname {{ golden_target_iqn }}
+      --portal {{ qnap_iscsi_portal }} --login
+  become: true
+  run_once: true
+  changed_when: true
+
+# The block device name (/dev/sdX) depends on enumeration order and
+# isn't predictable ahead of time - resolve it properly rather than
+# guessing sda/sdb. First attempt here walked the session's own
+# "device" symlink expecting a target*/*/block subtree under it - that
+# doesn't exist (confirmed 2026-08-12: the symlink resolves to the
+# session's own sysfs node, nothing useful below it). The real path is
+# session -> host number (readable from the session's resolved sysfs
+# path, e.g. /sys/devices/platform/host0/session4/...) -> block device
+# under /sys/class/scsi_device/<host>:0:0:0/device/block/. Deliberately
+# no lsscsi/iscsiadm-session-parsing dependency - pure sysfs, so the
+# exact same technique also works inside the initramfs in
+# files/iscsi-overlay-root, where iscsid isn't running to ask.
+- name: Wait for the iSCSI block device to appear and resolve its name
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      for i in $(seq 1 10); do
+        dev="";
+        for s in /sys/class/iscsi_session/session*; do
+          if grep -q "{{ golden_target_iqn }}" "$s/targetname" 2>/dev/null; then
+            host=$(readlink -f "$s" | sed -n 's|.*/host\([0-9]\+\)/.*|\1|p');
+            dev=$(ls "/sys/class/scsi_device/${host}:0:0:0/device/block/" 2>/dev/null);
+            break;
+          fi;
+        done;
+        [ -n "$dev" ] && echo "/dev/$dev" && exit 0;
+        sleep 1;
+      done;
+      exit 1
+    executable: /bin/bash
+  become: true
+  run_once: true
+  register: golden_block_device
+  changed_when: false
+
+- name: Write the built squashfs onto the golden LUN
+  ansible.builtin.command:
+    cmd: >-
+      dd if={{ iscsi_golden_image_build_path }}/current.squashfs
+      of={{ golden_block_device.stdout }} bs=4M conv=fsync
+  become: true
+  run_once: true
+  changed_when: true
+
+- name: Log out of the golden target on k8smaster
+  ansible.builtin.command:
+    cmd: >-
+      iscsiadm -m node --targetname {{ golden_target_iqn }}
+      --portal {{ qnap_iscsi_portal }} --logout
+  become: true
+  run_once: true
+  changed_when: true

@@ -29,12 +29,30 @@ qnap_nfs_config_file: /etc/config/nfssetting
 # see day2-services project_qnap_backup_design memory for the full
 # debugging trail.
 qnap_nfs_squash:
-  - path: /share/external/DEV3302_1
-    value: no_root_squash,no_root_squash
   - path: /share/CACHEDEV1_DATA/pihole
     value: no_root_squash,no_root_squash
   - path: /share/CACHEDEV1_DATA/calibre-web
     value: no_root_squash,no_root_squash
+
+# Full-ACL managed exports (roles/qnap_exports/tasks/ensure_acl.yml) -
+# for exports whose client-rule *count* changes, not just a squash
+# value on an unchanged rule set. /backup widened 2026-08-14 to cover
+# both home subnets (192.168.1.0/24 wired, 192.168.2.0/24 WLAN) with
+# rw + no_root_squash, for a traveling DHCP client (a Mac) rather than
+# pinning specific IPs that won't survive a lease change. Deliberately
+# scoped to the LAN only, not exposed beyond it - this is acceptable on
+# a private home network under this project's threat model (see
+# day2-services project_qnap_backup_design memory), NOT something to
+# copy for an internet-facing export. Collapsing to two /24 rules
+# rather than keeping k8smaster/pinode-01's old specific /32 entries
+# alongside a new subnet rule - the /24s already cover both.
+qnap_nfs_acl:
+  - path: /share/external/DEV3302_1
+    allow_ip: "192.168.1.0/24,192.168.2.0/24"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "1000,1000"
+    anon_gid: "100,100"
 
 # New exports created from scratch (roles/qnap_exports/tasks/create_export.yml),
 # as opposed to qnap_nfs_squash above which only ever modifies a setting

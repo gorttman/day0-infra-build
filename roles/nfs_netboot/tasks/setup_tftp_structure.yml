@@ -83,6 +83,33 @@
   loop: "{{ nodes | default([]) }}"
   when: (nodes | default([])) | length > 0
 
+# Separate from the firmware symlink above, not redundant with it -
+# confirmed 2026-08-16 the hard way this was missing the whole time: the
+# Pi firmware fetches dtoverlay=... files via TFTP at "overlays/<name>.dtbo",
+# relative to the boot directory itself, NOT "firmware/overlays/<name>.dtbo".
+# Without this symlink, every dtoverlay= line in config.txt silently
+# 404s and gets skipped - no error anywhere, config.txt's other
+# settings (kernel filename, arm_64bit, etc.) all still apply fine, so
+# nothing about the boot looks broken unless you specifically need an
+# overlay's effect and go looking for why it never happened.
+- name: Symlink overlays directory to base/firmware/overlays (see comment above - separate path the firmware actually fetches from)
+  ansible.builtin.file:
+    src: "../base/firmware/overlays"
+    dest: "{{ tftp_root }}/{{ item.name }}/overlays"
+    state: link
+    force: true
+  loop: "{{ nodes | default([]) }}"
+  when: (nodes | default([])) | length > 0
+
+# cmdline.txt.j2 deliberately carries no "FILE:" header comment unlike
+# every other template in this repo - the RPi firmware/kernel parses
+# this file as raw space-separated boot parameters, not a file with
+# comment support. A header line here was confirmed 2026-08-14 to
+# render literally into the live file, undetected for an unknown
+# period because pinode-01 had 35+ days of uptime and never rebooted
+# to actually exercise a freshly-rendered cmdline.txt until the same
+# investigation that found the vers=4.2 bug. Keep the template pristine
+# - put any future explanation here, in the task, not in the template.
 - name: Render cmdline.txt for each node
   ansible.builtin.template:
     src: cmdline.txt.j2

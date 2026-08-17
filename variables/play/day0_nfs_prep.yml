@@ -20,7 +20,17 @@ sd_card_device: "/dev/mmcblk0"
 sd_card_mount_point: "/mnt/golden-sd"
 
 # NFS mount options
-nfs_version: "4.2"
+# vers=3, not 4.x - this drives the ROOT filesystem mount (nfsroot= on
+# the kernel cmdline below), performed by klibc's minimal `nfsmount`
+# inside the initramfs, not the full nfs-utils mount.nfs. Confirmed the
+# hard way 2026-08-12 (pinode-01 boot failure investigation): that
+# specific tool only understands integer NFS versions and rejects both
+# "4.2" ("invalid value for vers") and plain "4" ("bad NFS version
+# '4'") outright - it has no NFSv4 support at all, only v2/v3. This had
+# been vers=4.2 for an unknown period without anyone noticing, because
+# pinode-01 had 35+ days of continuous uptime and never actually
+# rebooted since - the bug was real but dormant the whole time.
+nfs_version: "3"
 nfs_mount_opts: "vers={{ nfs_version }},hard,timeo=600,retrans=10,noacl,nocto"
 
 # Boot configuration

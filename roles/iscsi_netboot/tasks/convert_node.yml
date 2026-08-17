@@ -1,0 +1,65 @@
+---
+# Converts one already-known node from NFS-root to iSCSI-root boot mode.
+# Deliberately separate from nfs_netboot's add_node.yml flow: that flow
+# auto-discovers brand-new nodes from dhcpd logs, which doesn't apply
+# here - this targets an existing node whose identity is already known
+# and is passed in explicitly, not discovered.
+#
+# Required vars (pass via -e or a vars file, not committed with real
+# values since this is meant to be invoked deliberately per node):
+#   node_name           e.g. pinode-01
+#   node_mac_suffix      e.g. 2793f1 (last 6 hex chars of the MAC, no colons)
+#   node_initiator_iqn   this node's iSCSI initiator IQN, e.g.
+#                         iqn.2026-08.com.i3sec:pinode-01 - must match
+#                         what's baked into /etc/iscsi/initiatorname.iscsi
+#                         in the golden image (all nodes share one image,
+#                         so this is set per-node via the cmdline
+#                         iscsi_initiator= param at boot, not per-image).
+#   node_ip              this node's wired backend-VLAN IP, e.g.
+#                         192.168.1.11 - written into the node's own
+#                         /etc/rancher/k3s/config.yaml as node-ip: by
+#                         populate_node_root_lun.yml. Confirmed the hard
+#                         way 2026-08-16: the golden tree's own shared
+#                         config.yaml has no node-ip at all, so without
+#                         this kubelet auto-detects its address off the
+#                         default route (wlan0), which the kubelet
+#                         serving cert then gets generated against too -
+#                         both wrong, and reaching that address from
+#                         k8smaster fails outright (502 Bad Gateway) once
+#                         it becomes the registered InternalIP, since the
+#                         UniFi AP's client isolation blocks it - see
+#                         homelab-book chapter 6. Wired-only, deliberately
+#                         not comma-separated with the WLAN address too:
+#                         tried that live, kubelet used the WLAN address
+#                         as primary instead of just adding it as a second
+#                         cert SAN, breaking exec/logs entirely rather
+#                         than just leaving a cosmetic TLS mismatch.
+#
+# Prerequisite: the golden image must already be built and provisioned
+# (build_golden_image.yml + provision_golden_lun.yml) before converting
+# any node - this task does not build it.
+#
+# This only rewrites TFTP config - it does NOT reboot the node. The
+# conversion takes effect on the node's next reboot, same as any other
+# netboot config change in this project.
+
+- name: Fail fast if required node identity vars are missing
+  ansible.builtin.assert:
+    that:
+      - node_name is defined
+      - node_mac_suffix is defined
+      - node_initiator_iqn is defined
+      - node_ip is defined
+    fail_msg: >-
+      convert_node.yml requires node_name, node_mac_suffix,
+      node_initiator_iqn, and node_ip to be set - see this file's header
+      comment.
+
+- name: Provision this node's root LUN on the QNAP
+  ansible.builtin.include_tasks: provision_node_lun.yml
+
+- name: Populate this node's root LUN with a full copy of the golden OS
+  ansible.builtin.include_tasks: populate_node_root_lun.yml
+
+- name: Render this node's iSCSI boot config
+  ansible.builtin.include_tasks: render_iscsi_boot_config.yml

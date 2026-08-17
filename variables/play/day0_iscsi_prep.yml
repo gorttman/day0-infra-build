@@ -1,0 +1,18 @@
+################################################################################
+# FILE: variables/play/day0_iscsi_prep.yml
+################################################################################
+---
+staging_dir: "/tmp/{{ ansible_play_name | lower | regex_replace('[a-z0-9]+','-') }}"
+
+# Paths must match day0_nfs_prep.yml / day1_node_prep.yml - the golden
+# image build reads from the same nfs_os_path every NFS-mode node still
+# boots from today. iSCSI mode does not replace that tree, it packages
+# it differently for the nodes that opt in.
+nfs_root_base: "/srv/nfs"
+nfs_os_path: "{{ nfs_root_base }}/rpios/latest"
+tftp_root: "/var/www/html/netboot/rpi5"
+
+# Role defaults (roles/iscsi_netboot/defaults/main.yml) cover the QNAP
+# portal, volume ID, LUN naming, and capacities - not duplicated here.
+# Override per-environment only if this ever runs against a different
+# QNAP than the one Phase 0 was validated against.

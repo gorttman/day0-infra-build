@@ -150,3 +150,101 @@
     - name: Deploy the unified restore.sh
       ansible.builtin.include_role:
         name: backup_restore
+
+- name: Day0 ISCSI prep
+  hosts: all
+  become: true
+  tags:
+    - manage_iscsi
+
+  vars_files:
+    - variables/common/set_environment.yml
+    - "variables/play/{{ ansible_play_name | lower | regex_replace('[^a-z0-9]+', '_') }}.yml"
+
+  pre_tasks:
+    - name: Ensure roles from requirements.yml are installed
+      ansible.builtin.command:
+        cmd: ansible-galaxy install -r roles/requirements.yml -p roles/
+      changed_when: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run shared workspace role
+      ansible.builtin.include_role:
+        name: shared_workspace
+
+  tasks:
+    # Builds and publishes the shared golden image only - see
+    # roles/iscsi_netboot/tasks/main.yml. Does not touch any node's
+    # boot_mode; run the two tags below for that, per node, deliberately.
+    - name: Build and provision the golden iSCSI image
+      ansible.builtin.include_role:
+        name: iscsi_netboot
+
+# Deliberately separate from Day0 ISCSI prep above rather than folded
+# into one play with a conditional: converting a node is a per-node,
+# explicitly-invoked action (see roles/iscsi_netboot/tasks/convert_node.yml
+# header comment on why this can't be auto-discovered the way new nodes
+# are), never something that should run as a side effect of a routine
+# golden-image rebuild.
+- name: Day1 ISCSI convert node
+  hosts: all
+  become: true
+  tags:
+    - convert_iscsi_node
+
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/day0_iscsi_prep.yml
+
+  tasks:
+    - name: Convert one node from NFS-root to iSCSI-root
+      ansible.builtin.include_role:
+        name: iscsi_netboot
+        tasks_from: convert_node
+
+# Overlay-mode equivalent of the play above - see
+# roles/iscsi_netboot/tasks/convert_node_overlay.yml header comment for
+# why this is a separate entrypoint rather than a mode flag on it.
+- name: Day1 ISCSI convert node (overlay)
+  hosts: all
+  become: true
+  tags:
+    - convert_iscsi_node_overlay
+
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/day0_iscsi_prep.yml
+
+  tasks:
+    - name: Convert one node to the two-target overlay design
+      ansible.builtin.include_role:
+        name: iscsi_netboot
+        tasks_from: convert_node_overlay
+
+# The rollback path - see roles/iscsi_netboot/tasks/rollback_node.yml.
+# Kept as its own tag rather than a flag on the play above so rolling
+# back is never one typo'd variable away from converting instead.
+- name: Day1 ISCSI rollback node
+  hosts: all
+  become: true
+  tags:
+    - rollback_iscsi_node
+
+  # day1_node_prep.yml is required, not optional - rollback_node.yml
+  # delegates to nfs_netboot's own cmdline.txt render, which needs
+  # kernel_params (defined there, not in day0_iscsi_prep.yml). Confirmed
+  # missing the hard way 2026-08-14: without it, this play gets through
+  # every other step and fails at the last one, right when it matters
+  # most - the actual point of a rollback play is to be trustworthy
+  # exactly when something else has already gone wrong.
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/day0_iscsi_prep.yml
+    - variables/play/day1_node_prep.yml
+
+  tasks:
+    - name: Roll one node back from iSCSI-root to NFS-root
+      ansible.builtin.include_role:
+        name: iscsi_netboot
+        tasks_from: rollback_node

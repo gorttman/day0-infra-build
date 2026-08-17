@@ -1,0 +1,201 @@
+---
+# Provisions one node's own root LUN/target on the QNAP - the full,
+# standalone-OS design (2026-08-15) that replaced the original
+# two-target overlay approach, see defaults/main.yml's header comment
+# for the full why (the overlay design needed a second concurrent
+# iscsi_tcp session, which crashed the board hard on every real boot
+# attempt). Grants that node's own initiator IQN an explicit ACL entry,
+# but - see the "Default Policy" comment further down - the target ends
+# up open to any initiator on this LAN either way, same trust model as
+# the golden LUN. This LUN starts empty here - populate_node_root_lun.yml
+# (run immediately after this in convert_node.yml) is what actually
+# writes the OS onto it, not this file.
+#
+# Requires two vars from the caller: node_mac_suffix (drives the
+# target/LUN name via role defaults) and node_initiator_iqn.
+#
+# run_once: true throughout - `hosts: all` in this inventory resolves
+# to both `k8smaster` and `localhost` (the same physical machine) - see
+# install_iscsi_initiator.yml's header comment for how double-execution
+# was found and confirmed as a real bug, not a hypothetical.
+#
+# become: false on every qnap-delegated task - the play sets
+# `become: true` at the play level, which becomes the default even for
+# delegated tasks. QNAP's admin account can't sudo to root (confirmed
+# 2026-08-12: "sudo: unknown user: root") - qcli_iscsi has never needed
+# it, same as every other qnap_* role in this project.
+
+- name: Log in to QCLI
+  ansible.builtin.include_tasks: qcli_login.yml
+  run_once: true
+
+- name: Check existing targets
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_target_check
+  changed_when: false
+
+- name: Create this node's writable target
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -C Alias={{ iscsi_node_target_name }} Name={{ iscsi_node_target_name }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: iscsi_node_target_name not in node_target_check.stdout
+  changed_when: true
+
+- name: Check existing LUNs
+  ansible.builtin.raw: /sbin/qcli_iscsi -l
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_lun_check
+  changed_when: false
+
+# Allocation=Instant, not the default Thin - see provision_golden_lun.yml's
+# comment on this same line for the full story (confirmed 2026-08-12 a
+# Thin LUN never gets exposed as a real block device on this QNAP).
+- name: Create this node's writable LUN (file-based - see role defaults)
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -c Name={{ iscsi_node_lun_name }}
+    Capacity={{ iscsi_node_lun_capacity_gb }}
+    Allocation=Instant
+    LUNType=File volumeID={{ qnap_iscsi_volume_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: iscsi_node_lun_name not in node_lun_check.stdout
+  changed_when: true
+
+- name: Re-check target list to find this node's target ID
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_target_list
+  changed_when: false
+
+- name: Re-check LUN list to find this node's LUN ID
+  ansible.builtin.raw: /sbin/qcli_iscsi -l
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_lun_list
+  changed_when: false
+
+- name: Extract this node's target ID
+  ansible.builtin.set_fact:
+    node_target_id: >-
+      {{ node_target_list.stdout
+         | regex_search('targetID\s+(\d+)\s*\n\s*TargetIQN\s+\S*' + iscsi_node_target_name, '\1')
+         | first }}
+  run_once: true
+
+- name: Extract this node's LUN ID
+  ansible.builtin.set_fact:
+    node_lun_id: >-
+      {{ node_lun_list.stdout
+         | regex_search('(\d+)\s+--\s+\S+\s+--\s+' + iscsi_node_lun_name, '\1')
+         | first }}
+  run_once: true
+
+- name: Check whether this node's LUN is already mapped to its target
+  ansible.builtin.raw: /sbin/qcli_iscsi -I targetID={{ node_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_lun_mapping_check
+  changed_when: false
+
+# qcli_iscsi -m is NOT idempotent at the underlying LIO/configfs level -
+# confirmed 2026-08-15 the hard way it creates a brand new lun_N entry
+# under tpgt_1/lun/ every time it's called, even when this exact LUN is
+# already mapped to this exact target. qcli_iscsi -I's own listing only
+# ever shows the current/latest state, which masked 6 stale duplicate
+# mappings (all pointing at the same backing store) that had silently
+# accumulated across repeated convert_iscsi_node re-runs before this
+# guard existed - cleaned up by hand via direct configfs surgery. This
+# check is what stops that recurring.
+- name: Map this node's LUN to its target (skipped if already mapped)
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -m lunID={{ node_lun_id }} targetID={{ node_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: >-
+    not (node_lun_mapping_check.stdout
+         | regex_search('LunID\s+' + node_lun_id + '(\s|$)', multiline=True))
+  changed_when: true
+
+# Confirmed 2026-08-15 the hard way: mapping (-m) alone does NOT
+# actually activate a freshly-mapped LUN for SCSI presentation on this
+# QNAP - a session can log in successfully (iscsiadm shows LOGGED_IN)
+# and still see zero attached SCSI devices, even though `qcli_iscsi -i`
+# already reports "LUNtargetStatus Enabled" for it (a misleading
+# read-back - the display doesn't reflect the real backend state).
+# This explicit -s/--setlun action=Enabled call is what actually
+# triggers the QNAP to commit the LUN live - confirmed by direct
+# reproduction: same target, same LUN, zero devices before this call,
+# a working /dev/sdX immediately after it, no other change. Only
+# noticed on this node's 50GB LUN, not the smaller ones created
+# earlier - plausibly QNAP does this activation automatically for LUNs
+# created and mapped in the same short window as this project's
+# earlier ones happened to be, but not reliably enough to trust without
+# calling it explicitly every time.
+- name: Explicitly enable this node's LUN on its target (mapping alone doesn't activate it)
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -s lunID={{ node_lun_id }} action=Enabled targetID={{ node_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  changed_when: true
+
+# QTS auto-generates the IQN suffix on target creation - not
+# predictable ahead of time, read back rather than reconstructed.
+# render_iscsi_boot_config.yml consumes this fact - it must run after
+# this task in the same play, not standalone.
+#
+# Anchored to this node's own target name, not a bare first-match -
+# confirmed 2026-08-12 that an unanchored regex_search over the full
+# target list silently grabs whichever target happens to be listed
+# first (the golden target, since it's created before any node target
+# exists), not this node's own. Real bug: pinode-01's first conversion
+# attempt rendered iscsi_node_target as a duplicate of iscsi_golden_target.
+- name: Extract this node's target's real IQN
+  ansible.builtin.set_fact:
+    node_target_iqn: >-
+      {{ (node_target_list.stdout
+          | regex_search('TargetIQN\s+(\S*' + iscsi_node_target_name + '\S*)', '\1'))
+          | first }}
+  run_once: true
+
+- name: Grant this node's own initiator ACL
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -A targetID={{ node_target_id }}
+    initiatorIQN={{ node_initiator_iqn }} initiatorAlias={{ node_mac_suffix }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: acl_add
+  changed_when: "'ok' in acl_add.stdout"
+  failed_when: acl_add.rc != 0 and 'already' not in acl_add.stdout
+
+# Deliberately NOT removing the "Default Policy" wildcard initiator
+# entry, despite the target also having a real, specific ACL for this
+# node above - tried exactly that on 2026-08-14 and it broke
+# authorization completely, for every initiator including the one
+# explicitly ACL'd. Confirmed by direct reproduction on k8smaster,
+# outside the initramfs entirely: with only the specific pinode-01
+# entry present, iscsistart got "initiator failed authorization with
+# target" (error 24) every time; re-adding the wildcard entry fixed it
+# immediately, no other change. This looks like a real QTS 4.3.4
+# firmware quirk - a specific-initiator ACL entry doesn't function on
+# its own, the wildcard has to stay present alongside it. Given that,
+# this node's writable LUN ends up with the same trust model as the
+# golden LUN already has by design (open to any initiator on this
+# private LAN) - not the tighter per-node restriction originally
+# intended, but the tighter version is not achievable on this hardware
+# as far as tonight's testing found, and a working shared-trust model
+# beats a non-functional restricted one.

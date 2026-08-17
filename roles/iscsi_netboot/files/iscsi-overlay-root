@@ -1,0 +1,158 @@
+#!/bin/sh
+# Rebuilt 2026-08-15 (second attempt at the two-target overlay design -
+# the first attempt was retired the same night after crashing on every
+# real boot at the second iscsistart call; that crash is now understood
+# to be dropbear-initramfs's init-bottom cleanup killing its own socket
+# in the same fragile RP1-NIC window, fixed elsewhere in this role, and
+# confirmed by direct test that two concurrent sessions survive fine
+# with that fix in place - see install_iscsi_initiator.yml's dropbear
+# no-op task for the full story).
+#
+# Logs into BOTH the shared read-only golden target and this node's own
+# writable delta target, resolves both to real block devices, and
+# leaves the results in /run/iscsi-overlay for /scripts/iscsi-overlay's
+# mountroot() to consume. Deliberately separate cmdline parameter names
+# (iscsi_golden_target=/iscsi_node_target=) from the stock local-top/
+# iscsi hook's iscsi_target_name= - that hook stays installed and
+# harmlessly no-ops (its own fail-fast check exits early when it never
+# sees iscsi_target_name= on the cmdline) rather than needing to be
+# disabled/renamed for overlay-mode boots.
+
+PREREQ="udev"
+
+prereqs() {
+	echo "$PREREQ"
+}
+
+case "$1" in
+	prereqs)
+		prereqs
+		exit 0
+	;;
+esac
+
+. /scripts/functions
+
+ISCSI_INITIATOR=""
+ISCSI_TARGET_IP=""
+ISCSI_TARGET_PORT="3260"
+ISCSI_GOLDEN_TARGET=""
+ISCSI_NODE_TARGET=""
+ISCSI_CONTAINERD_TARGET=""
+
+for x in $(cat /proc/cmdline); do
+	case ${x} in
+	iscsi_initiator=*)
+		ISCSI_INITIATOR="${x#iscsi_initiator=}"
+		;;
+	iscsi_target_ip=*)
+		ISCSI_TARGET_IP="${x#iscsi_target_ip=}"
+		;;
+	iscsi_target_port=*)
+		ISCSI_TARGET_PORT="${x#iscsi_target_port=}"
+		;;
+	iscsi_golden_target=*)
+		ISCSI_GOLDEN_TARGET="${x#iscsi_golden_target=}"
+		;;
+	iscsi_node_target=*)
+		ISCSI_NODE_TARGET="${x#iscsi_node_target=}"
+		;;
+	iscsi_containerd_target=*)
+		ISCSI_CONTAINERD_TARGET="${x#iscsi_containerd_target=}"
+		;;
+	esac
+done
+
+# Not an overlay-mode boot (or missing required params) - leave root
+# resolution to whatever else handles it (e.g. the stock hook) and get
+# out of the way.
+if [ -z "$ISCSI_INITIATOR" ] || [ -z "$ISCSI_TARGET_IP" ] || \
+   [ -z "$ISCSI_GOLDEN_TARGET" ] || [ -z "$ISCSI_NODE_TARGET" ] || \
+   [ -z "$ISCSI_CONTAINERD_TARGET" ]; then
+	exit 0
+fi
+
+configure_networking
+
+modprobe iscsi_tcp
+modprobe crc32c
+
+# Same sysfs-walk technique provision_golden_lun.yml uses from a full
+# OS (session -> host number -> block device under
+# /sys/class/scsi_device/<host>:0:0:0/device/block/) - no iscsiadm/
+# iscsid dependency, works the same way in this minimal environment.
+#
+# Not actually a timing lag (an earlier version of this comment guessed
+# that, wrongly) - confirmed 2026-08-15 via netconsole that the golden
+# (first) session gets its full scsi/sd probe sequence
+# (Direct-Access -> [sdX] -> Attached SCSI disk) within a second, but
+# the node (second, concurrent) session's SCSI host registers
+# ("scsi hostN: iSCSI Initiator over TCP/IP") and then nothing further
+# ever happens on its own - no LUN probe at all, however long it's
+# given. The session itself is genuinely fine (QNAP's own TCP session
+# table shows both ESTABLISHED); it's specifically iscsistart's
+# automatic post-login LUN scan that doesn't reliably fire for a second
+# concurrent host in this environment. Fixed with an explicit rescan
+# trigger (the standard `echo "- - -" > .../scan` technique) once the
+# matching host is identified, rather than waiting on autodiscovery
+# that may never come.
+resolve_dev_for_target() {
+	target="$1"
+	for i in $(seq 1 30); do
+		for s in /sys/class/iscsi_session/session*; do
+			[ -e "$s/targetname" ] || continue
+			if grep -q "$target" "$s/targetname" 2>/dev/null; then
+				host=$(readlink -f "$s" | sed -n 's|.*/host\([0-9]\+\)/.*|\1|p')
+				if [ -e "/sys/class/scsi_host/host${host}/scan" ]; then
+					echo "- - -" > "/sys/class/scsi_host/host${host}/scan" 2>/dev/null
+				fi
+				for blockdir in /sys/class/scsi_device/"${host}":*/device/block/*; do
+					if [ -e "$blockdir" ]; then
+						udevadm settle --timeout=2 2>/dev/null
+						basename "$blockdir"
+						return 0
+					fi
+				done
+			fi
+		done
+		sleep 1
+	done
+	return 1
+}
+
+mkdir -p /run/iscsi-overlay
+
+echo "iscsi-overlay-root: logging into golden target ${ISCSI_GOLDEN_TARGET}" > /dev/kmsg
+iscsistart -i "$ISCSI_INITIATOR" -t "$ISCSI_GOLDEN_TARGET" -g 1 \
+	-a "$ISCSI_TARGET_IP" -p "$ISCSI_TARGET_PORT"
+gdev=$(resolve_dev_for_target "$ISCSI_GOLDEN_TARGET")
+if [ -z "$gdev" ]; then
+	echo "iscsi-overlay-root: FAILED to resolve golden device - session established but no block device appeared in time" > /dev/kmsg
+	exit 1
+fi
+echo "iscsi-overlay-root: golden device is /dev/${gdev}" > /dev/kmsg
+echo "/dev/${gdev}" > /run/iscsi-overlay/golden-device
+
+echo "iscsi-overlay-root: logging into node writable target ${ISCSI_NODE_TARGET}" > /dev/kmsg
+iscsistart -i "$ISCSI_INITIATOR" -t "$ISCSI_NODE_TARGET" -g 1 \
+	-a "$ISCSI_TARGET_IP" -p "$ISCSI_TARGET_PORT"
+ndev=$(resolve_dev_for_target "$ISCSI_NODE_TARGET")
+if [ -z "$ndev" ]; then
+	echo "iscsi-overlay-root: FAILED to resolve node device - session established but no block device appeared in time" > /dev/kmsg
+	exit 1
+fi
+echo "iscsi-overlay-root: node device is /dev/${ndev}" > /dev/kmsg
+echo "/dev/${ndev}" > /run/iscsi-overlay/node-device
+
+echo "iscsi-overlay-root: logging into containerd-storage target ${ISCSI_CONTAINERD_TARGET}" > /dev/kmsg
+iscsistart -i "$ISCSI_INITIATOR" -t "$ISCSI_CONTAINERD_TARGET" -g 1 \
+	-a "$ISCSI_TARGET_IP" -p "$ISCSI_TARGET_PORT"
+cdev=$(resolve_dev_for_target "$ISCSI_CONTAINERD_TARGET")
+if [ -z "$cdev" ]; then
+	echo "iscsi-overlay-root: FAILED to resolve containerd device - session established but no block device appeared in time" > /dev/kmsg
+	exit 1
+fi
+echo "iscsi-overlay-root: containerd device is /dev/${cdev}" > /dev/kmsg
+echo "/dev/${cdev}" > /run/iscsi-overlay/containerd-device
+
+exit 0

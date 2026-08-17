@@ -1,0 +1,44 @@
+---
+# Renders this node's iSCSI-mode cmdline.txt into the exact same
+# per-node TFTP directory nfs_netboot's setup_tftp_structure.yml already
+# writes to (tftp_root/{{ node.name }}/) - this IS the rollback
+# mechanism: re-running nfs_netboot's own render for this one node
+# overwrites cmdline.txt back to NFS content, no separate rollback code
+# path to maintain.
+#
+# config.txt is left untouched - it only names the kernel/initramfs/dtb
+# to load, nothing root-specific, so the NFS-mode one nfs_netboot
+# already rendered is still correct here unchanged.
+#
+# The template itself (iscsi-cmdline.txt.j2) is deliberately a single
+# line with NO comments - confirmed 2026-08-12 the hard way that an
+# earlier draft with a comment header got rendered verbatim into
+# cmdline.txt, and the RPi kernel parses that file as raw
+# space-separated cmdline tokens, not a file with `#`-comment support -
+# a comment line would become garbage kernel parameters, not get
+# skipped. Any explanation belongs here in the task file, never in the
+# template.
+#
+# root=UUID=... + iscsi_target_name=/iscsi_target_ip=/iscsi_initiator=
+# is the stock, Raspberry-Pi-OS-maintained scripts/local-top/iscsi
+# hook's own cmdline convention (re-enabled 2026-08-15, replacing this
+# project's custom two-target overlay design entirely - see
+# defaults/main.yml's header comment for why). That hook logs in via
+# iscsistart so the block device exists before the generic mountroot
+# step's own root=UUID= resolution runs - no custom mountroot()
+# override needed, no ROOTFS_MOUNTED-style signaling needed. No golden
+# target lookup needed either: this node's root LUN is a full,
+# standalone OS copy (populate_node_root_lun.yml), not a shared
+# read-only base combined with anything else at boot time.
+#
+# Requires node_target_iqn (set by provision_node_lun.yml) and
+# node_root_uuid.stdout (set by populate_node_root_lun.yml) already in
+# scope - convert_node.yml always runs both before this in the same
+# play.
+
+- name: Render this node's iSCSI cmdline.txt
+  ansible.builtin.template:
+    src: iscsi-cmdline.txt.j2
+    dest: "{{ tftp_root }}/{{ node_name }}/cmdline.txt"
+    mode: '0644'
+  run_once: true

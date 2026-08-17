@@ -1,0 +1,518 @@
+---
+# Installs open-iscsi (iscsiadm/iscsistart/iscsid + the initramfs-tools
+# hooks that make iSCSI-root boot possible) into the shared golden image
+# tree at {{ nfs_os_path }}.
+#
+# Deliberately NOT done by live apt-install over SSH into a booted
+# pinode. /var there is bind-mounted from an NFS export with
+# local_lock=none (the per-node overlay's own deliberate choice, almost
+# certainly for the same reason NFS locking was avoided elsewhere in
+# this project after the Pi-hole SQLite-on-NFS lesson) - dpkg's own
+# lock file genuinely cannot work there. Confirmed the hard way during
+# the Phase 0 spike, which had to fall back to a manual `dpkg-deb -x`
+# extraction as a one-off workaround.
+#
+# Chrooting from k8smaster avoids the problem entirely: nfs_os_path is
+# a normal local directory here, since k8smaster IS the NFS server -
+# no NFS client mount is involved, no lock incompatibility exists.
+#
+# run_once: true on every task here - `hosts: all` in this inventory
+# resolves to BOTH `k8smaster` and `localhost`, which are the same
+# physical machine (both ansible_connection=local, confirmed in
+# hosts.ini) - without run_once, every command here runs twice,
+# concurrently, against the same golden image tree. Confirmed the hard
+# way 2026-08-12: a real double bind-mount of /dev resulted, needing a
+# lazy unmount to clean up. Every other task file in this role that
+# touches the golden image tree or issues qcli_iscsi commands needs the
+# same guard - this isn't unique to this file.
+
+- name: Check if proc/sys/dev are already bind-mounted (re-run after a crash, not idempotent otherwise)
+  ansible.builtin.command:
+    cmd: "mountpoint -q {{ nfs_os_path }}/{{ item }}"
+  loop: [proc, sys, dev]
+  become: true
+  run_once: true
+  register: already_mounted
+  failed_when: false
+  changed_when: false
+
+- name: Bind-mount proc/sys/dev into the golden image for the chroot
+  ansible.builtin.command:
+    cmd: "mount --bind /{{ item.item }} {{ nfs_os_path }}/{{ item.item }}"
+  loop: "{{ already_mounted.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  become: true
+  run_once: true
+  when: item.rc != 0
+  changed_when: true
+
+# initramfs-tools' postinst runs `update-initramfs` automatically, which
+# tries to auto-detect the device backing `/` to decide which kernel
+# modules to include - that detection has nothing real to find inside a
+# chroot (there's no actual mounted root, just a bind-mounted directory
+# tree), and fails outright: "mkinitramfs: failed to determine device
+# for /". Confirmed 2026-08-12 - this aborted the whole apt transaction,
+# not just a warning. MODULES=most is the tool's own suggested
+# workaround (printed in its error output) - include a broad, generic
+# module set instead of trying to detect a minimal one, which sidesteps
+# the detection entirely and is the standard technique for any
+# chroot/debootstrap-style image build, not specific to this project.
+- name: Ensure initramfs-tools uses MODULES=most (chroot has no real root device to auto-detect)
+  ansible.builtin.lineinfile:
+    path: "{{ nfs_os_path }}/etc/initramfs-tools/initramfs.conf"
+    regexp: '^MODULES='
+    line: "MODULES=most"
+  become: true
+  run_once: true
+
+# 2026-08-15: the actual root cause of every iSCSI-mode boot crash
+# tonight - confirmed via netconsole once it was working, and via
+# independent community research (raspberrypi/linux #7339, PR #7340) -
+# is a real hardware/PCIe-fabric bug in the RP1 southbridge's macb
+# ethernet path: the PCIe posted write carrying the TSTART "start
+# transmission" doorbell can be delayed/reordered and never reach the
+# MAC, so TX silently stops forever while RX and interrupts keep
+# working and no error is ever logged - exactly the symptom captured
+# tonight (link never drops, zero ethtool error counters, total
+# silence). Fixed upstream, merged into the Raspberry Pi Foundation's
+# own rpi-6.18.y kernel branch 2026-05-08 - this project already runs
+# their kernel (rpt-rpi- naming), not Ubuntu's (whose linux-raspi
+# kernel didn't have it backported as of the community writeup this
+# was found from), so a plain package upgrade should carry the fix
+# directly rather than needing any workaround.
+- name: Upgrade the kernel/firmware inside the chroot (carries the RP1/macb TX-stall fix, raspberrypi/linux PR #7340)
+  ansible.builtin.command:
+    cmd: >-
+      chroot {{ nfs_os_path }} /bin/bash -c
+      "INITRD=No apt-get update && INITRD=No apt-get install -y linux-image-rpi-2712 linux-image-rpi-v8 raspi-firmware"
+  become: true
+  run_once: true
+  register: chroot_kernel_upgrade
+  changed_when: "'0 upgraded, 0 newly installed' not in chroot_kernel_upgrade.stdout"
+
+# apt install adds the new kernel version alongside the old one, it
+# doesn't replace it - leaving both installed is a real correctness
+# risk downstream, not just bloat: the TFTP-deploy step later matches
+# kernel version to destination filename by substring ('2712' in
+# item), looping over whatever versions happen to exist, so with two
+# versions present the loop's iteration order (not anything meaningful
+# about which is newer) decides which one's initrd actually ends up
+# served to nodes. Alphabetical sort isn't a safe stand-in for version
+# ordering either (e.g. "6.2" sorts after "6.18" even though it's
+# numerically older) - purging the old kernel outright removes the
+# ambiguity at the source instead of relying on loop-order luck, here
+# or on any future upgrade.
+- name: Purge the previous kernel version now that the upgrade is installed
+  ansible.builtin.shell:
+    cmd: >-
+      chroot {{ nfs_os_path }} /bin/bash -c
+      "OLD=\$(dpkg -l | awk '/^ii  linux-image-[0-9]/ {print \$2}' | grep -v 6.18.39);
+      if [ -n \"\$OLD\" ]; then INITRD=No apt-get purge -y \$OLD; else echo 'no older kernel found'; fi"
+  become: true
+  run_once: true
+  register: chroot_kernel_purge
+  changed_when: "'no older kernel found' not in chroot_kernel_purge.stdout"
+
+# Confirmed 2026-08-15: purging a kernel package removes vmlinuz-*, but
+# NOT the initrd.img-* it once had generated - update-initramfs's
+# output files aren't owned/tracked by dpkg at all, so they're left
+# behind as orphans with no matching kernel or /lib/modules/<version>
+# once the package is gone. Explicit removal, not just relying on the
+# package purge to have handled it - the exact same lesson learned
+# earlier this same session with the retired local-top overlay-root
+# hook file.
+- name: Remove orphaned initrd files left behind by the kernel purge
+  ansible.builtin.shell:
+    cmd: >-
+      chroot {{ nfs_os_path }} /bin/bash -c
+      'for f in /boot/initrd.img-*; do
+      v=$(basename "$f" | sed "s/^initrd.img-//");
+      [ -d "/lib/modules/$v" ] || rm -f "$f";
+      done'
+  become: true
+  run_once: true
+  changed_when: true
+
+- name: Install open-iscsi inside the chroot
+  ansible.builtin.command:
+    cmd: >-
+      chroot {{ nfs_os_path }} /bin/bash -c
+      "INITRD=No apt-get update && INITRD=No apt-get install -y open-iscsi"
+  become: true
+  run_once: true
+  register: chroot_install
+  changed_when: "'0 upgraded, 0 newly installed' not in chroot_install.stdout"
+
+# Added 2026-08-14 after netconsole initially seemed to be a dead end
+# for real boot diagnosis on this hardware (that diagnosis was later
+# found to be wrong - see the netconsole-debug task further down, which
+# is installed, not removed): SSH to the node's real IP
+# consistently showed "connection refused" rather than "timed out" -
+# the signature of a node whose kernel-level ip=dhcp networking comes
+# up fine (independent of any of this project's own scripts) while
+# something in local-top hangs at initramfs-tools' own panic() rescue
+# shell, forever, with no way to reach it. netconsole requires the NIC
+# driver to implement ndo_poll_controller, which not all onboard
+# gigabit drivers do, and this one doesn't - dropbear-initramfs
+# sidesteps that entirely by using the already-confirmed-working normal
+# IP stack instead of raw netpoll, giving a real interactive shell into
+# the rescue environment whenever it's reached. Kept installed
+# permanently, not a one-off debugging step - cheap insurance for the
+# next time this boot chain needs real visibility, and it's what
+# actually diagnosed every bug found this session.
+- name: Install dropbear-initramfs inside the chroot (real SSH access into the rescue shell, no netpoll dependency)
+  ansible.builtin.command:
+    cmd: >-
+      chroot {{ nfs_os_path }} /bin/bash -c
+      "INITRD=No apt-get install -y dropbear-initramfs"
+  become: true
+  run_once: true
+  register: chroot_install_dropbear
+  changed_when: "'0 upgraded, 0 newly installed' not in chroot_install_dropbear.stdout"
+
+- name: Authorize this project's own key for the initramfs dropbear daemon
+  ansible.builtin.copy:
+    dest: "{{ nfs_os_path }}/etc/dropbear/initramfs/authorized_keys"
+    content: "{{ lookup('file', '~/.ssh/pinode_cluster_ed25519.pub') }}\n"
+    mode: '0600'
+  become: true
+  run_once: true
+
+# The initramfs dropbear key above only ever covered emergency access to
+# the boot environment - it was never authorized for the real OS's own
+# root account, confirmed 2026-08-16 the hard way after an entire
+# session's worth of diagnostics had to route through the fragile
+# dropbear-only path (intermittent connection refusals) instead of a
+# normal SSH session, because root's real authorized_keys only had the
+# user's own personal key (gorttman@i3sec.com.au - lives on their own
+# machine, not this controller). Appended, not replaced - blockinfile
+# so re-runs don't duplicate the line, and the user's own key stays
+# untouched alongside it.
+- name: Also authorize this project's own key for the real OS's root account
+  ansible.builtin.blockinfile:
+    path: "{{ nfs_os_path }}/root/.ssh/authorized_keys"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - cluster automation key"
+    block: "{{ lookup('file', '~/.ssh/pinode_cluster_ed25519.pub') }}"
+    create: true
+    mode: '0600'
+  become: true
+  run_once: true
+
+# 2026-08-15: this project's whole two-target overlay design (a
+# per-node writable delta combined with the golden squashfs, mounted
+# via a custom mountroot() override) is retired - it needed a second
+# concurrent iscsi_tcp session on top of the golden target's own
+# session, and every real-hardware boot attempt crashed the board hard
+# at whichever iscsistart/iscsiadm call opened that second session,
+# confirmed order-independent, confirmed not a memory issue, across 5
+# separate diagnostic attempts. Replaced with a design that never needs
+# a second session at all: each node's LUN holds a full, standalone
+# copy of the OS (populate_node_root_lun.yml), and boots through the
+# stock Raspberry-Pi-OS-maintained scripts/local-top/iscsi hook -
+# re-enabled below, not reinvented. This removes the need for
+# everything that only existed to make the overlay design work:
+#
+# - e2fsprogs-real-hook / mke2fs at boot: mkfs now happens once, on
+#   k8smaster's own real OS, during populate_node_root_lun.yml - the
+#   initramfs itself never runs mkfs anymore.
+# - iscsiadm-real-hook / iscsid+iscsiadm at boot: the stock hook uses
+#   plain iscsistart for its one login, same as it always has.
+# - The forced "overlay" kernel module: no overlay filesystem is
+#   mounted anymore, root is a plain ext4 device.
+# - iscsi-overlay-mountroot (the /scripts/iscsi-overlay mountroot()
+#   override) and boot=iscsi-overlay.
+#
+# All explicitly removed below, not just stopped-from-being-installed -
+# learned the hard way earlier this same session that Ansible's copy
+# module never deletes files it no longer manages, and update-initramfs
+# happily keeps including whatever it finds regardless of whether this
+# playbook still writes it.
+- name: Remove the retired mke2fs-at-boot hook if present from an older build
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/hooks/e2fsprogs-real-hook"
+    state: absent
+  become: true
+  run_once: true
+
+- name: Remove the retired iscsiadm/iscsid-at-boot hook if present from an older build
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/hooks/iscsiadm-real-hook"
+    state: absent
+  become: true
+  run_once: true
+
+- name: Remove the forced overlay module line if present from an older build
+  ansible.builtin.lineinfile:
+    path: "{{ nfs_os_path }}/etc/initramfs-tools/modules"
+    line: "overlay"
+    state: absent
+  become: true
+  run_once: true
+  failed_when: false
+
+- name: Remove the retired mountroot() override if present from an older build
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/iscsi-overlay"
+    state: absent
+  become: true
+  run_once: true
+
+- name: Remove the retired local-top overlay-root hook if present from an even older build
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/local-top/iscsi-overlay-root"
+    state: absent
+  become: true
+  run_once: true
+
+# Removed earlier the same night on a wrong diagnosis ("netpoll not
+# supported by this NIC driver"), then re-added a few hours later after
+# re-reading this session's own dmesg capture and finding
+# "netconsole: network logging started" already present - it DID
+# initialize successfully after the init-top/udev ordering fix
+# (macb driver, Broadcom BCM54213PE PHY, does support netpoll). The
+# real problem was packets not reaching the listener on k8smaster - a
+# delivery problem, not a driver capability problem. Kept installed
+# permanently: it's the only diagnostic channel this project has that
+# can survive a hard crash (packets sent as generated, not buffered -
+# dmesg itself is simply gone if the board resets).
+- name: Ensure init-top scripts directory exists
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/init-top"
+    state: directory
+    mode: '0755'
+  become: true
+  run_once: true
+
+- name: Install the netconsole boot-diagnostics script
+  ansible.builtin.copy:
+    src: netconsole-debug
+    dest: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/init-top/netconsole-debug"
+    mode: '0755'
+  become: true
+  run_once: true
+
+# Retired 2026-08-15 the same night it was added: it tested a specific
+# hypothesis (crash = a race against still-settling RP1/PCIe/USB
+# bring-up) that turned out to be a red herring once the real cause was
+# found via direct bisection - dropbear-initramfs's own init-bottom
+# cleanup script killing its listening socket right after root mount
+# (see the dropbear no-op task below). Removed rather than left
+# installed: it unconditionally added a 20s sleep to every single boot
+# forever for a hypothesis that's now disproven, which is exactly the
+# kind of stale diagnostic debt this file's own header comment (on the
+# retired overlay design) warns against leaving behind.
+- name: Remove the retired iSCSI boot settle-delay diagnostic script if present from an earlier build
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/init-top/iscsi-settle-delay"
+    state: absent
+  become: true
+  run_once: true
+
+# Re-enabled, not reinvented - see this task file's header comment for
+# the full why. Restores the stock hook's original name if a previous
+# build left it disabled/renamed; a plain `mv` would fail once the
+# source no longer exists (idempotent re-runs), so this checks first.
+- name: Check whether the stock iscsi hook is still disabled from an older build
+  ansible.builtin.stat:
+    path: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/local-top/iscsi.disabled-by-iscsi-overlay-root"
+  become: true
+  run_once: true
+  register: disabled_stock_hook
+
+- name: Re-enable the stock single-target iscsi initramfs hook
+  ansible.builtin.command:
+    cmd: >-
+      mv {{ nfs_os_path }}/usr/share/initramfs-tools/scripts/local-top/iscsi.disabled-by-iscsi-overlay-root
+      {{ nfs_os_path }}/usr/share/initramfs-tools/scripts/local-top/iscsi
+  become: true
+  run_once: true
+  when: disabled_stock_hook.stat.exists
+
+# Second attempt at the two-target overlay design (2026-08-15, same
+# night) - the first attempt was retired above after crashing on every
+# real boot at the second iscsistart call. That crash is now understood
+# to be dropbear-initramfs's init-bottom cleanup killing its own socket
+# in the same fragile RP1-NIC window (see the dropbear no-op task
+# below), not something inherent to running two concurrent sessions -
+# confirmed by a direct live test establishing a second session with
+# the dropbear fix already in place, which survived cleanly through a
+# full boot. Left installed alongside the still-working single-session
+# design (install below, not overwrite) rather than ripping that out -
+# switching between them is purely a matter of which cmdline params
+# render_iscsi_boot_config.yml renders (iscsi_target_name= selects the
+# stock hook re-enabled above; iscsi_golden_target=/iscsi_node_target=
+# selects this one - the stock hook harmlessly no-ops when it never
+# sees its own param, so both can coexist installed at once).
+- name: Install the e2fsprogs-in-initramfs hook (mkfs.ext4 for the writable delta's first boot)
+  ansible.builtin.copy:
+    src: e2fsprogs-real-hook
+    dest: "{{ nfs_os_path }}/usr/share/initramfs-tools/hooks/e2fsprogs-real-hook"
+    mode: '0755'
+  become: true
+  run_once: true
+
+- name: Install the two-target overlay local-top hook (dual iSCSI login)
+  ansible.builtin.copy:
+    src: iscsi-overlay-root
+    dest: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/local-top/iscsi-overlay-root"
+    mode: '0755'
+  become: true
+  run_once: true
+
+- name: Install the two-target overlay mountroot() override (boot=iscsi-overlay)
+  ansible.builtin.copy:
+    src: iscsi-overlay
+    dest: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/iscsi-overlay"
+    mode: '0755'
+  become: true
+  run_once: true
+
+# MODULES=most (set earlier in this file) should already pull this in
+# by heuristic, but the original design forced it explicitly and that's
+# cheap insurance to keep - overlayfs isn't tied to any physical device
+# the auto-detection could key off, unlike squashfs/ext4/iscsi_tcp which
+# are already reliably present because real devices of those types are
+# actually attached during the image build.
+- name: Force the overlay kernel module into the initramfs
+  ansible.builtin.lineinfile:
+    path: "{{ nfs_os_path }}/etc/initramfs-tools/modules"
+    line: "overlay"
+    state: present
+  become: true
+  run_once: true
+
+# Root-caused 2026-08-15 via direct bisection (breadcrumb printk markers
+# added at every init-bottom transition, then a live dropbear shell held
+# open across the freeze): dropbear-initramfs's own init-bottom cleanup
+# script kills its listening socket right after root mount, in the same
+# fragile window the RP1-hosted NIC is still settling from SCSI/iSCSI
+# traffic - this wedges the chip every time (netconsole and the whole
+# interface go silent, physical link drops at the switch). Confirmed via
+# elimination: adding IFDOWN=none (skipping only the script's interface-
+# down step) did NOT fix it, so the trigger is the kill itself, not the
+# link-down call. Never surfaced under NFS-root boot because BOOT=nfs
+# already skips part of this same script - this is specific to the
+# iSCSI-root mode switch, not a pre-existing issue. Fix: never kill
+# dropbear at all; see below for how port 22 stays free for the real
+# sshd despite that.
+- name: Replace the dropbear init-bottom hook with a no-op (see comment above)
+  ansible.builtin.copy:
+    src: dropbear-init-bottom-noop
+    dest: "{{ nfs_os_path }}/usr/share/initramfs-tools/scripts/init-bottom/dropbear"
+    mode: '0755'
+  become: true
+  run_once: true
+
+# dropbear is now left running for the life of the boot (see the no-op
+# hook above) rather than killed, so it must not sit on port 22 or the
+# real OS's sshd fails to bind it. This is the actual file the dropbear
+# build-time hook copies into the initrd - NOT /etc/dropbear/dropbear.conf,
+# which only exists inside the initramfs's own tmpfs at runtime and has
+# no effect on the built image (confirmed the hard way: editing that path
+# first had zero effect until this one was found via the hook's own
+# source).
+- name: Move dropbear-initramfs off port 22 so it never conflicts with the real sshd
+  ansible.builtin.blockinfile:
+    path: "{{ nfs_os_path }}/etc/dropbear/initramfs/dropbear.conf"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - pinode-01 iSCSI-root dropbear port fix"
+    block: |
+      DROPBEAR_OPTIONS="-p 2222"
+  become: true
+  run_once: true
+
+# `-u` (update) only regenerates initrds that already exist - it does
+# NOT create one for a kernel that's never had one, which is exactly
+# the newly-installed kernel's situation here: INITRD=No (used
+# deliberately above, same reasoning as the open-iscsi install, so
+# initrd generation doesn't run prematurely before our own hooks are in
+# place) also suppresses the kernel package's own normal
+# create-on-install postinst behavior. Confirmed 2026-08-15 the hard
+# way: after upgrading to 6.18.39, `-u -k all` only touched the old
+# 6.12.47 initrd (the one that already existed) and silently left no
+# initrd at all for 6.18.39, which then made the later TFTP-deploy step
+# fail outright ("Source .../initrd.img-6.18.39+rpt-rpi-v8 not found").
+# `-c` (create) is idempotent-safe to run for a kernel that already has
+# one too, so looping it over every discovered version is simpler and
+# more robust than trying to detect which ones are already missing.
+- name: Discover installed kernel versions before initramfs generation
+  ansible.builtin.command:
+    cmd: "ls {{ nfs_os_path }}/lib/modules"
+  become: true
+  run_once: true
+  register: pre_initrd_kernel_versions
+  changed_when: false
+
+- name: Create/update the initramfs for every installed kernel inside the chroot
+  ansible.builtin.command:
+    cmd: "chroot {{ nfs_os_path }} update-initramfs -c -k {{ item }}"
+  loop: "{{ pre_initrd_kernel_versions.stdout_lines }}"
+  become: true
+  run_once: true
+  register: initrd_create
+  failed_when: >-
+    initrd_create.rc != 0 and
+    'File exists' not in initrd_create.stderr
+  changed_when: initrd_create.rc == 0
+
+# The rebuild above only updates the initrd files INSIDE the golden
+# image tree ({{ nfs_os_path }}/boot/initrd.img-*) - it does nothing to
+# the copies TFTP-served nodes actually boot from
+# ({{ tftp_root }}/base/initramfs_2712 / initramfs8). Confirmed
+# 2026-08-14: this deployment step was missing entirely from day one -
+# every rebuild that night was manually `cp`'d into place by hand, and
+# the very first automated manage_iscsi run after that (this task's
+# addition) built a correct new initrd and then silently left the
+# stale one from two days earlier in place, since nothing copied it
+# over. Discovering that cost real time that should have gone
+# elsewhere - never assume "the build succeeded" means "the thing that
+# boots is now correct" without checking both halves.
+#
+# Determine which discovered kernel version maps to which TFTP
+# filename by substring match (2712 vs v8) rather than hardcoding a
+# full kernel version string that will eventually bump.
+- name: Discover built kernel versions
+  ansible.builtin.command:
+    cmd: "ls {{ nfs_os_path }}/lib/modules"
+  become: true
+  run_once: true
+  register: kernel_versions_raw
+  changed_when: false
+
+- name: Deploy the freshly-built initramfs images to the TFTP base directory
+  ansible.builtin.copy:
+    src: "{{ nfs_os_path }}/boot/initrd.img-{{ item }}"
+    dest: "{{ tftp_root }}/base/{{ 'initramfs_2712' if '2712' in item else 'initramfs8' }}"
+    mode: '0644'
+    remote_src: true
+  loop: "{{ kernel_versions_raw.stdout_lines }}"
+  become: true
+  run_once: true
+
+# -l (lazy): a plain umount on a bind-mounted host /dev routinely fails
+# "target is busy" while zram swap holds a kernel-level reference into
+# the underlying devtmpfs - confirmed 2026-08-12, not a hypothetical.
+# -l detaches it from the mount table immediately regardless, which is
+# what actually matters here: build_golden_image.yml's mksquashfs must
+# never see a live /proc, /sys, or /dev still exposed inside the tree,
+# or the image would end up with a snapshot of the host's own runtime
+# state baked into it instead of an empty mount point.
+- name: Unmount proc/sys/dev from the golden image (lazy)
+  ansible.builtin.command:
+    cmd: "umount -l {{ nfs_os_path }}/{{ item }}"
+  loop: [proc, sys, dev]
+  become: true
+  run_once: true
+  register: unmount_result
+  failed_when: false
+  changed_when: unmount_result.rc == 0
+
+- name: Verify nothing is still mounted inside the golden image tree
+  ansible.builtin.command:
+    cmd: "mountpoint -q {{ nfs_os_path }}/{{ item }}"
+  loop: [proc, sys, dev]
+  become: true
+  run_once: true
+  register: mountpoint_check
+  failed_when: mountpoint_check.rc == 0
+  changed_when: false

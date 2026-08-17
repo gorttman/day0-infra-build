@@ -1,0 +1,244 @@
+---
+# Writes a full, standalone copy of the golden OS onto this node's own
+# root LUN - the single-session replacement for the old two-target
+# overlay design (see defaults/main.yml's header comment on
+# iscsi_node_lun_capacity_gb for the full why). Runs from k8smaster,
+# same reasoning install_iscsi_initiator.yml's chroot approach already
+# established: k8smaster IS the NFS server, so the golden tree at
+# {{ nfs_os_path }} is a normal local directory here, and k8smaster can
+# iscsiadm-login the new LUN directly to populate it, no intermediate
+# NFS/network hop needed for the copy itself.
+#
+# Idempotent by design, not just by accident - safe to re-run against
+# an already-populated LUN (e.g. after a golden image update): blkid
+# check below skips mkfs if a filesystem already exists, and rsync's
+# own nature means re-running just syncs changes, not a fresh wipe.
+# Re-running this is exactly how a future "rebuild this node's root
+# from a newer golden image" flow would work.
+#
+# DANGER, confirmed live 2026-08-16: "safe to re-run" above only holds
+# when the target node is NOT currently booted from this same LUN. This
+# task logs k8smaster into the node's target directly, over iSCSI,
+# independent of and concurrent with whatever session the node itself
+# already holds from its own boot - the QNAP happily allows the second
+# login (no SCSI reservation enforced), which means two hosts get
+# simultaneous block-level write access to one plain ext4 filesystem
+# that has no clustering/coordination whatsoever. Done once, live,
+# against a booted pinode-01, and got lucky - no visible corruption
+# (checked dmesg for ext4/journal errors, confirmed writes still work),
+# but that was luck, not a property of this task, and it is not a
+# pattern to repeat. Only run this against a node that is powered off
+# or currently booted in NFS mode - never against a node currently
+# booted from the same iSCSI root LUN this task is about to mount.
+#
+# run_once: true throughout - same hosts:all double-execution guard
+# every other task in this role needs (see
+# install_iscsi_initiator.yml's header comment).
+
+- name: Discover the node target from k8smaster (wired portal only)
+  ansible.builtin.command:
+    cmd: "iscsiadm -m discovery -t sendtargets -p {{ qnap_iscsi_portal }}"
+  become: true
+  run_once: true
+  changed_when: true
+
+# failed_when guards re-runs (e.g. re-populating after a golden image
+# update) where a previous run's logout didn't complete - "already
+# present" isn't a real failure, same pattern the ACL grant task
+# elsewhere in this role already uses for the same class of idempotency
+# gap.
+- name: Log in to the node target from k8smaster
+  ansible.builtin.command:
+    cmd: >-
+      iscsiadm -m node --targetname {{ node_target_iqn }}
+      --portal {{ qnap_iscsi_portal }} --login
+  become: true
+  run_once: true
+  register: node_login_result
+  failed_when: >-
+    node_login_result.rc != 0 and
+    'already present' not in node_login_result.stderr
+  changed_when: node_login_result.rc == 0
+
+- name: Wait for the node LUN's block device to appear and resolve its name
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      for i in $(seq 1 10); do
+        dev=""
+        for s in /sys/class/iscsi_session/session*; do
+          if grep -q "{{ node_target_iqn }}" "$s/targetname" 2>/dev/null; then
+            host=$(readlink -f "$s" | sed -n 's|.*/host\([0-9]\+\)/.*|\1|p')
+            for blockdir in /sys/class/scsi_device/${host}:*/device/block/*; do
+              [ -e "$blockdir" ] && dev=$(basename "$blockdir") && break
+            done
+            break
+          fi
+        done
+        [ -n "$dev" ] && echo "/dev/$dev" && exit 0
+        sleep 1
+      done
+      exit 1
+  become: true
+  run_once: true
+  register: node_root_dev
+  changed_when: false
+
+- name: Check whether the node LUN already has a filesystem
+  ansible.builtin.command:
+    cmd: "blkid {{ node_root_dev.stdout }}"
+  become: true
+  run_once: true
+  register: node_root_blkid_check
+  failed_when: false
+  changed_when: false
+
+- name: Format the node LUN as ext4 (first population only)
+  ansible.builtin.command:
+    cmd: "mkfs.ext4 -F -q {{ node_root_dev.stdout }}"
+  become: true
+  run_once: true
+  when: node_root_blkid_check.rc != 0
+  changed_when: true
+
+- name: Ensure the mount point exists
+  ansible.builtin.file:
+    path: "/mnt/{{ node_name }}-root"
+    state: directory
+    mode: '0755'
+  become: true
+  run_once: true
+
+- name: Mount the node LUN
+  ansible.builtin.command:
+    cmd: "mount {{ node_root_dev.stdout }} /mnt/{{ node_name }}-root"
+  become: true
+  run_once: true
+  changed_when: true
+
+# --delete not used deliberately - a node's own root should only ever
+# gain golden-image updates on re-run, never lose runtime state
+# (container image cache, logs) just because the golden tree's own file
+# list changed shape. This is a one-way sync of the OS base, not a
+# mirror. Plain rsync, not ansible.posix.synchronize - both src and
+# dest are local paths on k8smaster itself (the golden tree directly,
+# and the just-mounted node LUN), not a controller-to-remote-host sync,
+# which is what synchronize is actually built for.
+- name: Sync the golden OS tree onto the node's root LUN
+  ansible.builtin.command:
+    cmd: >-
+      rsync -a --exclude=/proc/* --exclude=/sys/* --exclude=/dev/*
+      --exclude=/mnt/* --exclude=/run/*
+      {{ nfs_os_path }}/ /mnt/{{ node_name }}-root/
+  become: true
+  run_once: true
+  changed_when: true
+
+- name: Ensure empty mount-point directories exist on the node's root
+  ansible.builtin.file:
+    path: "/mnt/{{ node_name }}-root/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop: [proc, sys, dev, mnt, run]
+  become: true
+  run_once: true
+
+# The golden tree's own fstab has an NFS-root entry and per-node-overlay
+# comment left over from NFS-mode boot (setup-overlays.sh's job, not
+# needed here - see cluster-overlay.service disable below for why) -
+# replaced with a real root entry once the UUID is known. proc stays,
+# it's generic.
+- name: Get the node LUN's real filesystem UUID
+  ansible.builtin.command:
+    cmd: "blkid -s UUID -o value {{ node_root_dev.stdout }}"
+  become: true
+  run_once: true
+  register: node_root_uuid
+  changed_when: false
+
+- name: Write a clean fstab for the node's own root (replaces the NFS-mode one)
+  ansible.builtin.copy:
+    dest: "/mnt/{{ node_name }}-root/etc/fstab"
+    content: |
+      proc            /proc           proc    defaults          0       0
+      UUID={{ node_root_uuid.stdout }} / ext4 defaults,noatime 0 1
+    mode: '0644'
+  become: true
+  run_once: true
+
+# cluster-overlay.service's whole job (setup-overlays.sh) is bind-
+# mounting per-node NFS-backed directories over the shared golden root,
+# including the tmpfs-for-k3s-data workaround that was this entire
+# project's original motivation (containerd/overlayfs can't sit on
+# NFS). None of that applies here - this LUN is already a real,
+# directly-writable block device, the actual fix for that original
+# problem, not another layer papering over it. Disabled in the node's
+# own copy only, not the shared golden tree - NFS-mode nodes still need
+# it.
+# The golden tree's own /etc/rancher/k3s/config.yaml (just rsync'd onto
+# this node's root above) has server:/token: but deliberately no
+# node-ip: - it's shared, unmodified content, and node-ip is inherently
+# per-node. Without it, kubelet auto-detects its address off the
+# default route, which lands on wlan0 here - confirmed 2026-08-16 the
+# hard way this breaks exec/logs entirely once that becomes the node's
+# registered InternalIP (the UniFi AP's client isolation makes it
+# unreachable from k8smaster - homelab-book chapter 6). Reusing the
+# golden tree's own server/token lines rather than reconstructing them
+# from separate vars - one less place for the two to drift apart.
+- name: Read the golden tree's base k3s agent config (server + token)
+  ansible.builtin.slurp:
+    src: "{{ nfs_os_path }}/etc/rancher/k3s/config.yaml"
+  register: golden_k3s_config_raw
+  become: true
+  run_once: true
+
+# Extracted as separate facts and written back as plain template lines
+# below, not reassembled via `| join('\n')` - confirmed the hard way
+# 2026-08-17 that join('\n') inside an Ansible `content: |` block
+# scalar renders a literal two-character `\n` rather than a real
+# newline (YAML block-literal parsing doesn't interpret backslash
+# escapes, so Jinja never gets the chance to), producing a one-line
+# config.yaml that k3s-agent then fails to parse
+# ("yaml: mapping values are not allowed in this context").
+- name: Extract the golden config's server and token values
+  ansible.builtin.set_fact:
+    golden_k3s_server: "{{ (golden_k3s_config_raw.content | b64decode) | regex_search('^server:\\s*(\\S+)', '\\1') | first }}"
+    golden_k3s_token: "{{ (golden_k3s_config_raw.content | b64decode) | regex_search('^token:\\s*(\\S+)', '\\1') | first }}"
+  run_once: true
+
+- name: Write this node's own k3s agent config onto its root LUN (server/token from golden, node-ip pinned to the wired backend)
+  ansible.builtin.copy:
+    dest: "/mnt/{{ node_name }}-root/etc/rancher/k3s/config.yaml"
+    content: |
+      server: {{ golden_k3s_server }}
+      token: {{ golden_k3s_token }}
+      node-ip: {{ node_ip }}
+    mode: '0600'
+  become: true
+  run_once: true
+
+- name: Disable cluster-overlay.service in the node's own root (not needed on real block storage)
+  ansible.builtin.file:
+    path: "/mnt/{{ node_name }}-root/etc/systemd/system/{{ item }}/cluster-overlay.service"
+    state: absent
+  loop:
+    - multi-user.target.wants
+    - remote-fs.target.wants
+  become: true
+  run_once: true
+
+- name: Unmount the node LUN
+  ansible.builtin.command:
+    cmd: "umount /mnt/{{ node_name }}-root"
+  become: true
+  run_once: true
+  changed_when: true
+
+- name: Log out of the node target on k8smaster
+  ansible.builtin.command:
+    cmd: >-
+      iscsiadm -m node --targetname {{ node_target_iqn }}
+      --portal {{ qnap_iscsi_portal }} --logout
+  become: true
+  run_once: true
+  changed_when: true

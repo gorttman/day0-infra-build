@@ -1,0 +1,69 @@
+################################################################################
+# FILE: roles/qnap_exports/tasks/ensure_acl.yml
+################################################################################
+---
+# Manages the full per-export ACL (AllowIP, Permission, SquashOption,
+# AnonUID, AnonGID together) for an EXISTING export, as opposed to
+# ensure_squash.yml which only ever touches SquashOption alone. Needed
+# because these five sections are positionally paired (the Nth value in
+# each section corresponds to the same client rule) - changing the
+# number of rules for an export means all five have to move together or
+# the file ends up internally inconsistent (e.g. 2 AllowIP entries but
+# 3 SquashOption entries).
+#
+# Same check-then-fix idiom as ensure_squash.yml: only rewrites (and
+# only fires the NFS-restart handler) when a section's actual line
+# differs from the desired one, not unconditionally every run.
+- name: Check current AllowIP for each ACL-managed export
+  ansible.builtin.raw: >-
+    grep -qF '{{ item.path }} = {{ item.allow_ip }}' {{ qnap_nfs_config_file }} && echo MATCH || echo MISMATCH
+  loop: "{{ qnap_nfs_acl }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: acl_check
+  changed_when: false
+
+- name: Fix AllowIP where it doesn't match desired state
+  ansible.builtin.raw: >-
+    sed -i '/^\[AllowIP\]/,/^\[/{s|^{{ item.item.path }} = .*$|{{ item.item.path }} = {{ item.item.allow_ip }}|}' {{ qnap_nfs_config_file }}
+  loop: "{{ acl_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISMATCH' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Fix Permission where it doesn't match desired state
+  ansible.builtin.raw: >-
+    sed -i '/^\[Permission\]/,/^\[/{s|^{{ item.item.path }} = .*$|{{ item.item.path }} = {{ item.item.permission }}|}' {{ qnap_nfs_config_file }}
+  loop: "{{ acl_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISMATCH' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Fix SquashOption where it doesn't match desired state
+  ansible.builtin.raw: >-
+    sed -i '/^\[SquashOption\]/,/^\[/{s|^{{ item.item.path }} = .*$|{{ item.item.path }} = {{ item.item.squash }}|}' {{ qnap_nfs_config_file }}
+  loop: "{{ acl_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISMATCH' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Fix AnonUID where it doesn't match desired state
+  ansible.builtin.raw: >-
+    sed -i '/^\[AnonUID\]/,/^\[/{s|^{{ item.item.path }} = .*$|{{ item.item.path }} = {{ item.item.anon_uid }}|}' {{ qnap_nfs_config_file }}
+  loop: "{{ acl_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISMATCH' in item.stdout"
+  notify: Restart QNAP NFS service
+
+- name: Fix AnonGID where it doesn't match desired state
+  ansible.builtin.raw: >-
+    sed -i '/^\[AnonGID\]/,/^\[/{s|^{{ item.item.path }} = .*$|{{ item.item.path }} = {{ item.item.anon_gid }}|}' {{ qnap_nfs_config_file }}
+  loop: "{{ acl_check.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: "'MISMATCH' in item.stdout"
+  notify: Restart QNAP NFS service

@@ -1,0 +1,156 @@
+---
+# Provisions one node's writable delta LUN/target for the two-target
+# overlay design - see defaults/main.yml's header comment on
+# iscsi_node_delta_lun_capacity_gb for the full why this design exists
+# alongside the single-session one, not instead of it. This LUN starts
+# empty - /scripts/iscsi-overlay (baked into the initramfs by
+# install_iscsi_initiator.yml) formats it on the node's own actual
+# first boot, not here; this task only makes sure the QNAP-side
+# target/LUN/ACL exist.
+#
+# Requires two vars from the caller: node_mac_suffix (drives the
+# target/LUN name via role defaults) and node_initiator_iqn.
+#
+# run_once: true throughout - `hosts: all` in this inventory resolves
+# to both `k8smaster` and `localhost` (the same physical machine) - see
+# install_iscsi_initiator.yml's header comment for how double-execution
+# was found and confirmed as a real bug, not a hypothetical.
+#
+# become: false on every qnap-delegated task - the play sets
+# `become: true` at the play level, which becomes the default even for
+# delegated tasks. QNAP's admin account can't sudo to root (confirmed
+# 2026-08-12: "sudo: unknown user: root") - qcli_iscsi has never needed
+# it, same as every other qnap_* role in this project.
+
+- name: Log in to QCLI
+  ansible.builtin.include_tasks: qcli_login.yml
+  run_once: true
+
+- name: Check existing targets
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_delta_target_check
+  changed_when: false
+
+- name: Create this node's writable delta target
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -C Alias={{ iscsi_node_delta_target_name }} Name={{ iscsi_node_delta_target_name }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: iscsi_node_delta_target_name not in node_delta_target_check.stdout
+  changed_when: true
+
+- name: Check existing LUNs
+  ansible.builtin.raw: /sbin/qcli_iscsi -l
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_delta_lun_check
+  changed_when: false
+
+# Allocation=Instant, not the default Thin - see provision_golden_lun.yml's
+# comment on this same line for the full story (confirmed 2026-08-12 a
+# Thin LUN never gets exposed as a real block device on this QNAP).
+- name: Create this node's writable delta LUN (file-based - see role defaults)
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -c Name={{ iscsi_node_delta_lun_name }}
+    Capacity={{ iscsi_node_delta_lun_capacity_gb }}
+    Allocation=Instant
+    LUNType=File volumeID={{ qnap_iscsi_volume_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: iscsi_node_delta_lun_name not in node_delta_lun_check.stdout
+  changed_when: true
+
+- name: Re-check target list to find this node's delta target ID
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_delta_target_list
+  changed_when: false
+
+- name: Re-check LUN list to find this node's delta LUN ID
+  ansible.builtin.raw: /sbin/qcli_iscsi -l
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_delta_lun_list
+  changed_when: false
+
+- name: Extract this node's delta target ID
+  ansible.builtin.set_fact:
+    node_delta_target_id: >-
+      {{ node_delta_target_list.stdout
+         | regex_search('targetID\s+(\d+)\s*\n\s*TargetIQN\s+\S*' + iscsi_node_delta_target_name, '\1')
+         | first }}
+  run_once: true
+
+- name: Extract this node's delta LUN ID
+  ansible.builtin.set_fact:
+    node_delta_lun_id: >-
+      {{ node_delta_lun_list.stdout
+         | regex_search('(\d+)\s+--\s+\S+\s+--\s+' + iscsi_node_delta_lun_name, '\1')
+         | first }}
+  run_once: true
+
+- name: Check whether this node's delta LUN is already mapped to its target
+  ansible.builtin.raw: /sbin/qcli_iscsi -I targetID={{ node_delta_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: node_delta_lun_mapping_check
+  changed_when: false
+
+# qcli_iscsi -m is NOT idempotent at the underlying LIO/configfs level -
+# see provision_node_lun.yml's identical guard for the full story (found
+# there first, same fix applied here since it's the same tool doing the
+# same thing).
+- name: Map this node's delta LUN to its target (skipped if already mapped)
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -m lunID={{ node_delta_lun_id }} targetID={{ node_delta_target_id }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  when: >-
+    not (node_delta_lun_mapping_check.stdout
+         | regex_search('LunID\s+' + node_delta_lun_id + '(\s|$)', multiline=True))
+  changed_when: true
+
+# No explicit -s/--setlun action=Enabled step here, unlike the 50GB "rt"
+# LUN in provision_node_lun.yml - confirmed both there (by its own
+# comment) and again tonight provisioning this exact LUN live that the
+# activation quirk only showed up on that larger LUN; this smaller one
+# got a working /dev/sdX immediately after mapping alone, both times.
+
+# QTS auto-generates the IQN suffix on target creation - not
+# predictable ahead of time, read back rather than reconstructed.
+# The overlay cmdline render consumes this fact - it must run after
+# this task in the same play, not standalone.
+- name: Extract this node's delta target's real IQN
+  ansible.builtin.set_fact:
+    node_delta_target_iqn: >-
+      {{ (node_delta_target_list.stdout
+          | regex_search('TargetIQN\s+(\S*' + iscsi_node_delta_target_name + '\S*)', '\1'))
+          | first }}
+  run_once: true
+
+- name: Grant this node's own initiator ACL on the delta target
+  ansible.builtin.raw: >-
+    /sbin/qcli_iscsi -A targetID={{ node_delta_target_id }}
+    initiatorIQN={{ node_initiator_iqn }} initiatorAlias={{ node_mac_suffix }}
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: delta_acl_add
+  changed_when: "'ok' in delta_acl_add.stdout"
+  failed_when: delta_acl_add.rc != 0 and 'already' not in delta_acl_add.stdout
+
+# Deliberately NOT removing the "Default Policy" wildcard initiator
+# entry - see provision_node_lun.yml's identical comment on this same
+# QTS 4.3.4 firmware quirk (a specific-initiator ACL entry doesn't
+# function on its own, confirmed by direct reproduction there).

@@ -1,0 +1,50 @@
+---
+# Builds a versioned squashfs from the golden OS tree - the read-only
+# image every iSCSI-mode node's overlay root mounts. Versioned (not a
+# mutable "latest") so a bad image can be rolled back to the previous
+# one independently of the NFS-vs-iSCSI boot_mode rollback - the two
+# rollback mechanisms are unrelated and shouldn't be conflated.
+#
+# squashfs, not ext4: designed for safe concurrent read-only mounting by
+# many initiators at once, which is exactly what every node does here -
+# the same reason it's the standard choice for shared diskless images
+# elsewhere, not specific to this project.
+
+- name: Ensure squashfs-tools is installed (provides mksquashfs)
+  ansible.builtin.apt:
+    name: squashfs-tools
+    state: present
+  become: true
+  run_once: true
+
+- name: Ensure squashfs build output directory exists
+  ansible.builtin.file:
+    path: "{{ iscsi_golden_image_build_path }}"
+    state: directory
+    mode: '0755'
+  become: true
+  run_once: true
+
+- name: Compute image filename for this build
+  ansible.builtin.set_fact:
+    iscsi_golden_image_file: "rpios-{{ ansible_date_time.iso8601_basic_short }}.squashfs"
+  run_once: true
+
+- name: Build the squashfs from the golden image tree
+  ansible.builtin.command:
+    cmd: >-
+      mksquashfs {{ nfs_os_path }}
+      {{ iscsi_golden_image_build_path }}/{{ iscsi_golden_image_file }}
+      -comp zstd -noappend
+  become: true
+  run_once: true
+  changed_when: true
+
+- name: Point 'current' at the image just built
+  ansible.builtin.file:
+    src: "{{ iscsi_golden_image_file }}"
+    dest: "{{ iscsi_golden_image_build_path }}/current.squashfs"
+    state: link
+    force: true
+  become: true
+  run_once: true

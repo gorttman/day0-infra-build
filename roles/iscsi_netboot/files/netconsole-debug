@@ -1,0 +1,72 @@
+#!/bin/sh
+# Streams kernel log messages over UDP to k8smaster via netpoll -
+# survives a hard crash/panic (packets are sent as generated, not
+# buffered for later retrieval, unlike dmesg which is simply gone if
+# the board resets) - the only diagnostic channel this project has that
+# can actually capture what happens at the moment of the crash every
+# iSCSI-mode boot has hit, rather than inferring it from silence
+# afterward.
+#
+# Re-added 2026-08-15 after being wrongly retired the same night:
+# confirmed by re-reading this session's own earlier dmesg capture that
+# netconsole DID initialize successfully on this NIC after the
+# init-top/udev ordering fix below ("netconsole: network logging
+# started") - the driver (macb, Broadcom BCM54213PE PHY) does support
+# netpoll. The failure was packets not reaching the listener on
+# k8smaster, a delivery problem, not a driver capability problem - that
+# distinction was missed the first time, and the tool was thrown away
+# based on the wrong diagnosis.
+#
+# PREREQ=udev, not "" - confirmed 2026-08-14 the hard way: this
+# script's own init-top ORDER slot landed BEFORE scripts/init-top/udev
+# with an empty PREREQ, so /sys/class/net/* was always empty when the
+# MAC-match loop below ran (the interface driver hadn't been
+# probed/coldplugged yet). Declaring udev as a real prereq schedules
+# this after it, same ordering contract iscsi-overlay-mountroot already
+# relies on for its own PREREQ.
+PREREQ="udev"
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case "$1" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+# Don't hardcode the local interface name - this node's real interface
+# is "eth0" (confirmed via kernel boot logs and a live ifconfig), not
+# the predictable-name "end0" a Pi 5 would normally be expected to use,
+# but detecting by MAC instead of hardcoding either name is what
+# actually matters - it's correct regardless of which name applies at
+# this exact point in boot.
+IFACE=""
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+	for dev in /sys/class/net/*; do
+		name=$(basename "$dev")
+		[ "$name" = "lo" ] && continue
+		mac=$(cat "$dev/address" 2>/dev/null)
+		if [ "$mac" = "2c:cf:67:27:93:f1" ]; then
+			IFACE="$name"
+			break 2
+		fi
+	done
+	sleep 1
+done
+if [ -z "$IFACE" ]; then
+	for dev in /sys/class/net/*; do
+		name=$(basename "$dev")
+		[ "$name" = "lo" ] && continue
+		IFACE="$name"
+		break
+	done
+fi
+
+if [ -n "$IFACE" ]; then
+	modprobe netconsole netconsole=@192.168.1.11/${IFACE},6666@192.168.1.10/88:a2:9e:2e:af:a0 2>/dev/null || true
+fi
+
+exit 0
