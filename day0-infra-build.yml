@@ -151,11 +151,31 @@
       ansible.builtin.include_role:
         name: backup_restore
 
+# THE canonical entrypoint for any OS-level change (kernel, packages,
+# config baked into the golden tree) - aliased as both manage_iscsi
+# (the original name) and os_upgrade (the name that says what it's
+# actually for). Despite the name, this covers BOTH boot modes, always,
+# in one pass - never just one:
+#   - NFS-root nodes live-mount nfs_os_path directly, so they pick up
+#     whatever this play writes into the golden tree on their own next
+#     reboot, no extra step needed.
+#   - iSCSI-root nodes (the default as of 2026-08-17) get a frozen
+#     snapshot instead - iscsi_netboot's own tasks/main.yml rebuilds
+#     that snapshot and republishes it to the golden LUN every time this
+#     play runs, so an iSCSI node's next reboot picks up the change too.
+# This exact split is what let a kernel upgrade silently regress WiFi
+# for a full night (2026-08-16/17): the golden tree was upgraded once
+# outside of this play, iSCSI's squashfs was never rebuilt to match,
+# and nothing surfaced the mismatch until a node actually rebooted onto
+# stale content. Always run OS-level changes through this one
+# entrypoint - never edit nfs_os_path directly and separately from
+# rebuilding/republishing the iSCSI image, however small the change.
 - name: Day0 ISCSI prep
   hosts: all
   become: true
   tags:
     - manage_iscsi
+    - os_upgrade
 
   vars_files:
     - variables/common/set_environment.yml
@@ -174,10 +194,10 @@
         name: shared_workspace
 
   tasks:
-    # Builds and publishes the shared golden image only - see
+    # Builds and publishes the shared golden image - see
     # roles/iscsi_netboot/tasks/main.yml. Does not touch any node's
     # boot_mode; run the two tags below for that, per node, deliberately.
-    - name: Build and provision the golden iSCSI image
+    - name: Build and provision the golden iSCSI image (updates both NFS and iSCSI boot paths - see header comment above)
       ansible.builtin.include_role:
         name: iscsi_netboot
 

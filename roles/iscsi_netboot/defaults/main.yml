@@ -1,4 +1,13 @@
 ---
+# Computed default, not a value every caller has to pass - the IQN is
+# fully mechanical: "iqn.<naming-authority-date>.<reverse-domain>:<host>"
+# per RFC 3723. The 2026-08 component is a fixed naming-authority date
+# (when this domain was registered for IQN purposes), not a per-node or
+# per-run value - it never changes just because a new node is being
+# added later. Still overridable via -e for the rare case a node needs
+# a non-standard initiator name.
+node_initiator_iqn: "iqn.2026-08.com.i3sec:{{ node_name }}"
+
 # iSCSI portal - wired QNAP face only, deliberately. The Phase 0 spike
 # found `iscsiadm -m discovery` returns the target on both the QNAP's
 # wired (192.168.1.30) and WLAN (192.168.2.30) portals, and login
