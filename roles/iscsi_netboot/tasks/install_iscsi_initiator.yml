@@ -66,30 +66,63 @@
   become: true
   run_once: true
 
-# 2026-08-15: the actual root cause of every iSCSI-mode boot crash
-# tonight - confirmed via netconsole once it was working, and via
-# independent community research (raspberrypi/linux #7339, PR #7340) -
-# is a real hardware/PCIe-fabric bug in the RP1 southbridge's macb
-# ethernet path: the PCIe posted write carrying the TSTART "start
-# transmission" doorbell can be delayed/reordered and never reach the
-# MAC, so TX silently stops forever while RX and interrupts keep
-# working and no error is ever logged - exactly the symptom captured
-# tonight (link never drops, zero ethtool error counters, total
-# silence). Fixed upstream, merged into the Raspberry Pi Foundation's
-# own rpi-6.18.y kernel branch 2026-05-08 - this project already runs
-# their kernel (rpt-rpi- naming), not Ubuntu's (whose linux-raspi
-# kernel didn't have it backported as of the community writeup this
-# was found from), so a plain package upgrade should carry the fix
-# directly rather than needing any workaround.
-- name: Upgrade the kernel/firmware inside the chroot (carries the RP1/macb TX-stall fix, raspberrypi/linux PR #7340)
+# 2026-08-15: an earlier theory placed the root cause of every
+# iSCSI-mode boot crash that night in a RP1/macb PCIe TX-stall erratum
+# (raspberrypi/linux #7339, PR #7340), fixed upstream in the
+# Foundation's rpi-6.18.y branch - "upgrade the kernel" was the fix
+# that theory implied, unpinned/always-latest, since the whole point
+# was to move past 6.12.x onto whatever carried that fix.
+#
+# That theory turned out to be a red herring for the actual crash (the
+# real cause, found later the same night: dropbear-initramfs's own
+# init-bottom cleanup killing its socket in a fragile RP1-NIC window -
+# see the dropbear no-op task below), and "upgrade to latest" turned
+# out to be actively harmful for an unrelated reason found the
+# following night (2026-08-16/17): kernel 6.18.39 has a genuine
+# regression where pinctrl-bcm2712 never binds under this netboot path
+# (confirmed via ftrace - zero driver-matching calls fire despite a
+# byte-correct compatible-string match), which silently kills WiFi
+# entirely. 6.12.47 - the version this hardware originally shipped
+# with - does not have that bug, and was extensively live-verified this
+# session: clean boot, working WiFi at the expected address, correct
+# routing, and real k3s pods (containerd pull/run/complete) all
+# confirmed working on it.
+#
+# So: pinned to the exact confirmed-good version, not "latest" -
+# "latest" is precisely what silently re-broke WiFi once already
+# tonight (a live apt-mark hold caught it that time; this makes the
+# pin a property of the code, not of whatever state happens to be set
+# on whichever machine last ran this by hand). If a future kernel
+# actually needs to be adopted (a real macb fix backported to 6.12.x,
+# a newer LTS, whatever), that should be a deliberate version-string
+# change here plus a fresh full boot-test cycle - never a bare
+# "upgrade to whatever's newest today".
+- name: Install the pinned, confirmed-good kernel/firmware inside the chroot
   ansible.builtin.command:
     cmd: >-
       chroot {{ nfs_os_path }} /bin/bash -c
-      "INITRD=No apt-get update && INITRD=No apt-get install -y linux-image-rpi-2712 linux-image-rpi-v8 raspi-firmware"
+      "INITRD=No apt-get update && INITRD=No apt-get install -y
+      linux-image-rpi-2712=1:6.12.47-1+rpt1
+      linux-image-rpi-v8=1:6.12.47-1+rpt1
+      raspi-firmware"
   become: true
   run_once: true
   register: chroot_kernel_upgrade
   changed_when: "'0 upgraded, 0 newly installed' not in chroot_kernel_upgrade.stdout"
+
+# Belt-and-braces alongside the explicit version pin above: holds
+# survive even if some future task or manual chroot session runs a
+# bare `apt-get upgrade` (no explicit package/version) that would
+# otherwise happily move these past the pin.
+- name: Hold the pinned kernel packages so nothing else can silently upgrade them
+  ansible.builtin.command:
+    cmd: >-
+      chroot {{ nfs_os_path }} /bin/bash -c
+      "apt-mark hold linux-image-6.12.47+rpt-rpi-2712 linux-image-6.12.47+rpt-rpi-v8
+      linux-image-rpi-2712 linux-image-rpi-v8"
+  become: true
+  run_once: true
+  changed_when: true
 
 # apt install adds the new kernel version alongside the old one, it
 # doesn't replace it - leaving both installed is a real correctness
@@ -103,12 +136,16 @@
 # numerically older) - purging the old kernel outright removes the
 # ambiguity at the source instead of relying on loop-order luck, here
 # or on any future upgrade.
-- name: Purge the previous kernel version now that the upgrade is installed
+# Keep-version updated to 6.12.47 alongside the pin above - this used
+# to say 6.18.39 (the old "upgrade to latest" target) and would
+# otherwise now purge the very version just pinned and held.
+- name: Purge any kernel version other than the pinned one
   ansible.builtin.shell:
     cmd: >-
       chroot {{ nfs_os_path }} /bin/bash -c
-      "OLD=\$(dpkg -l | awk '/^ii  linux-image-[0-9]/ {print \$2}' | grep -v 6.18.39);
-      if [ -n \"\$OLD\" ]; then INITRD=No apt-get purge -y \$OLD; else echo 'no older kernel found'; fi"
+      "OLD=\$(dpkg -l | awk '/^ii  linux-image-[0-9]/ {print \$2}' | grep -v 6.12.47);
+      if [ -n \"\$OLD\" ]; then apt-mark unhold \$OLD 2>/dev/null;
+      INITRD=No apt-get purge -y \$OLD; else echo 'no older kernel found'; fi"
   become: true
   run_once: true
   register: chroot_kernel_purge
