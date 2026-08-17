@@ -54,7 +54,7 @@
 - name: Ensure host-level QNAP mounts (fstab + mounted)
   ansible.posix.mount:
     path: "{{ item.path }}"
-    src: "{{ qnap_fqdn }}:{{ item.export }}"
+    src: "{{ qnap_short }}:{{ item.export }}"
     fstype: nfs
     # nofail: a QNAP outage/reboot must not hang k8smaster's own boot
     # waiting on this mount - systemd honours it for fstab-derived

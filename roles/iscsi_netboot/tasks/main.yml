@@ -1,0 +1,25 @@
+---
+# Default entrypoint - prepares the shared initramfs/kernel (still
+# genuinely shared across every node, NFS-mode and iSCSI-mode alike,
+# since they all boot from the same TFTP base/ files). Node-specific
+# actions (convert_node, rollback_node) are invoked individually via
+# tasks_from, the same way nfs_netboot's add_node is, since they need
+# per-node vars a fleet-wide default run can't supply.
+#
+# build_golden_image.yml/provision_golden_lun.yml re-included 2026-08-15
+# (same night, later) - the two-target overlay design they support was
+# re-attempted after finding its original "crashes on the second
+# session" symptom was actually the dropbear-kill bug fixed in
+# install_iscsi_initiator.yml, not something inherent to concurrent
+# sessions. Rebuilds the golden squashfs from the current golden tree
+# every run, same as any other golden-image change - needed here so it
+# always carries whatever's currently baked into {{ nfs_os_path }}
+# (tonight: the dropbear fix, kernel 6.18.39), not a stale pre-fix copy.
+- name: Bake open-iscsi and both iscsi boot hooks (single-session + overlay) into the golden image
+  ansible.builtin.include_tasks: install_iscsi_initiator.yml
+
+- name: Build the golden squashfs from the current golden image tree
+  ansible.builtin.include_tasks: build_golden_image.yml
+
+- name: Provision the golden LUN/target and publish the freshly-built squashfs onto it
+  ansible.builtin.include_tasks: provision_golden_lun.yml

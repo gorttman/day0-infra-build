@@ -1,0 +1,51 @@
+---
+# Renders this node's overlay-mode cmdline.txt - the two-target
+# equivalent of render_iscsi_boot_config.yml. Writes to the same
+# per-node TFTP directory, so switching a node between NFS/single-
+# session-iSCSI/overlay-iSCSI is always just a matter of which render
+# task last ran for it - no separate rollback code path needed here
+# either, same reasoning render_iscsi_boot_config.yml's own header
+# comment gives.
+#
+# boot=iscsi-overlay selects /scripts/iscsi-overlay as this node's
+# mountroot() (baked into the initramfs by install_iscsi_initiator.yml)
+# in place of the stock /scripts/local - see that script's own header
+# comment for how the root gets assembled from the two sessions this
+# cmdline's iscsi_golden_target=/iscsi_node_target= params identify.
+# root=/dev/ram0 is a harmless placeholder, never actually consulted -
+# mountroot() here doesn't look at $ROOT at all, unlike the stock
+# "local" boot type.
+#
+# Requires node_delta_target_iqn (set by provision_node_delta_lun.yml),
+# node_containerd_target_iqn (set by provision_node_containerd_lun.yml),
+# and golden_target_iqn (looked up fresh below - facts don't carry
+# across plays, and this render can run standalone from the "Day1"
+# play, separate from wherever the golden LUN was last provisioned)
+# already in scope.
+
+- name: Log in to QCLI
+  ansible.builtin.include_tasks: qcli_login.yml
+  run_once: true
+
+- name: Look up the golden target's current IQN
+  ansible.builtin.raw: /sbin/qcli_iscsi -L
+  delegate_to: "{{ groups['qnap'][0] }}"
+  become: false
+  run_once: true
+  register: golden_target_lookup
+  changed_when: false
+
+- name: Extract the golden target's real IQN
+  ansible.builtin.set_fact:
+    golden_target_iqn: >-
+      {{ (golden_target_lookup.stdout
+          | regex_search('TargetIQN\s+(\S*' + iscsi_golden_target_name + '\S*)', '\1'))
+          | first }}
+  run_once: true
+
+- name: Render this node's overlay-mode cmdline.txt
+  ansible.builtin.template:
+    src: iscsi-overlay-cmdline.txt.j2
+    dest: "{{ tftp_root }}/{{ node_name }}/cmdline.txt"
+    mode: '0644'
+  run_once: true

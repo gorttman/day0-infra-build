@@ -1,0 +1,1 @@
+console=serial0,115200 console=tty1 root=UUID={{ node_root_uuid.stdout }} rootfstype=ext4 ip=dhcp rootwait fsck.repair=yes plymouth.ignore-serial-consoles cgroup_memory=1 cgroup_enable=memory consoleblank=0 iscsi_initiator={{ node_initiator_iqn }} iscsi_target_name={{ node_target_iqn }} iscsi_target_ip={{ qnap_iscsi_portal }} iscsi_target_port=3260

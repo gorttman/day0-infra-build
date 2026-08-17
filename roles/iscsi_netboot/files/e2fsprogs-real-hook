@@ -1,0 +1,26 @@
+#!/bin/sh
+# Copies mkfs.ext4 into the initrd - needed by /scripts/iscsi-overlay's
+# mountroot() to format the per-node writable delta LUN on its first
+# boot (that LUN starts as raw unformatted space; unlike the single-
+# session design's provision_node_lun.yml, which formats its full-OS
+# copy once from k8smaster ahead of time, the overlay design's delta
+# is deliberately formatted on-device on first boot instead, since it
+# starts genuinely empty).
+
+PREREQ=""
+
+prereqs() {
+	echo "$PREREQ"
+}
+
+case "$1" in
+	prereqs)
+		prereqs
+		exit 0
+	;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+copy_exec /sbin/mkfs.ext4
+copy_exec /sbin/mke2fs

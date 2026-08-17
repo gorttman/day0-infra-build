@@ -8,5 +8,13 @@
 - name: Include export-creation tasks
   ansible.builtin.include_tasks: create_export.yml
 
+# Runs before ensure_squash.yml: ensure_acl.yml manages the full ACL
+# (including squash) for exports whose whole client-rule set changes,
+# not just the squash value on an unchanged rule set - see that file's
+# own header comment for why these can't be two independent mechanisms
+# touching the same export.
+- name: Include full-ACL tasks
+  ansible.builtin.include_tasks: ensure_acl.yml
+
 - name: Include squash-setting tasks
   ansible.builtin.include_tasks: ensure_squash.yml

@@ -1,0 +1,42 @@
+---
+# Converts one already-known node from whatever boot mode it's
+# currently in to the two-target overlay design - the overlay
+# equivalent of convert_node.yml. Deliberately a separate entrypoint,
+# not a mode flag on that file: an overlay-mode node needs a genuinely
+# different provisioning step (a small writable delta LUN, never a full
+# OS copy) and a different cmdline render, and keeping them as two
+# explicit, separately-invoked files means picking the wrong one for a
+# given node is a typo in the tag you run, not a wrong variable buried
+# in a shared task's logic.
+#
+# Required vars (pass via -e or a vars file, same as convert_node.yml):
+#   node_name           e.g. pinode-01
+#   node_mac_suffix      e.g. 2793f1
+#   node_initiator_iqn   this node's iSCSI initiator IQN
+#
+# Prerequisite: the golden image and golden LUN must already be built
+# and provisioned (install_iscsi_initiator.yml + build_golden_image.yml
+# + provision_golden_lun.yml, all part of the default manage_iscsi
+# entrypoint) - this task does not build or publish the golden image.
+#
+# This only rewrites TFTP config and QNAP-side LUN/target state - it
+# does NOT reboot the node, same as convert_node.yml.
+
+- name: Fail fast if required node identity vars are missing
+  ansible.builtin.assert:
+    that:
+      - node_name is defined
+      - node_mac_suffix is defined
+      - node_initiator_iqn is defined
+    fail_msg: >-
+      convert_node_overlay.yml requires node_name, node_mac_suffix, and
+      node_initiator_iqn to be set - see this file's header comment.
+
+- name: Provision this node's writable delta LUN on the QNAP
+  ansible.builtin.include_tasks: provision_node_delta_lun.yml
+
+- name: Provision this node's containerd-storage LUN on the QNAP
+  ansible.builtin.include_tasks: provision_node_containerd_lun.yml
+
+- name: Render this node's overlay-mode iSCSI boot config
+  ansible.builtin.include_tasks: render_iscsi_overlay_boot_config.yml

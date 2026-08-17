@@ -1,0 +1,109 @@
+#!/bin/sh
+# Rebuilt 2026-08-15 - custom mountroot() for the two-target overlay
+# design, selected via boot=iscsi-overlay on the kernel cmdline. Sourced
+# by /init in place of the stock /scripts/local, same convention that
+# file already uses for boot=nfs etc. See iscsi-overlay-root's own
+# header comment for why this design is being retried tonight.
+#
+# Assembles the real root from two already-logged-in iSCSI sessions
+# (device paths left in /run/iscsi-overlay by local-top/iscsi-overlay-
+# root, which runs before mountroot is ever called):
+#   - the golden device: a raw squashfs image dd'd directly onto its
+#     LUN by provision_golden_lun.yml, shared read-only by every node
+#   - the node device: this node's own small writable delta LUN,
+#     formatted here on first boot only (starts genuinely empty)
+# combined via overlayfs into ${rootmnt}.
+
+mountroot()
+{
+	# This completely replaces the stock /scripts/local's own
+	# mountroot(), which is what normally calls
+	# `run_scripts /scripts/local-top` - since nothing else does that
+	# anymore, local-top/iscsi-overlay-root would otherwise never run at
+	# all. Confirmed the hard way 2026-08-15: without this, /init just
+	# sits forever (panic() dropping to a console-only rescue shell,
+	# invisible over netconsole/SSH) because the device files this
+	# function checks for below are never written by anything. Called
+	# directly, not via run_scripts - cryptopensc/cryptroot (the other
+	# local-top scripts, LUKS-related) don't apply to this design.
+	/scripts/local-top/iscsi-overlay-root
+
+	mkdir -p /run/iscsi-overlay
+	if [ ! -f /run/iscsi-overlay/golden-device ] || [ ! -f /run/iscsi-overlay/node-device ] || \
+	   [ ! -f /run/iscsi-overlay/containerd-device ]; then
+		panic "iscsi-overlay: golden/node/containerd device paths missing - iscsi-overlay-root did not populate them"
+	fi
+
+	GOLDEN_DEV="$(cat /run/iscsi-overlay/golden-device)"
+	NODE_DEV="$(cat /run/iscsi-overlay/node-device)"
+	CONTAINERD_DEV="$(cat /run/iscsi-overlay/containerd-device)"
+
+	mkdir -p /golden /upper
+
+	modprobe squashfs
+	echo "iscsi-overlay: mounting golden squashfs ${GOLDEN_DEV} read-only" > /dev/kmsg
+	mount -t squashfs -o ro "${GOLDEN_DEV}" /golden
+
+	# First boot only - the delta LUN starts as raw unformatted space.
+	FIRST_BOOT=false
+	if ! blkid "${NODE_DEV}" >/dev/null 2>&1; then
+		echo "iscsi-overlay: formatting ${NODE_DEV} (first boot)" > /dev/kmsg
+		mkfs.ext4 -F -q "${NODE_DEV}"
+		FIRST_BOOT=true
+	fi
+	mount -t ext4 "${NODE_DEV}" /upper
+	mkdir -p /upper/data /upper/work
+
+	modprobe overlay
+	echo "iscsi-overlay: mounting overlay onto ${rootmnt}" > /dev/kmsg
+	mount -t overlay overlay \
+		-o lowerdir=/golden,upperdir=/upper/data,workdir=/upper/work \
+		"${rootmnt}"
+
+	# containerd's overlayfs snapshotter cannot use a directory that is
+	# itself backed by overlayfs - "filesystem on top of overlayfs not
+	# supported as upperdir", confirmed live 2026-08-16 the first time
+	# k3s-agent actually tried to start containerd under this design.
+	# Mounting a genuinely separate real-ext4 device directly onto this
+	# one path (after the overlay above, since the path lives inside
+	# ${rootmnt}) sidesteps overlayfs semantics entirely for everything
+	# under it, which is exactly what containerd's own snapshotter needs.
+	# Same first-boot-format-else-just-mount pattern as the node delta
+	# device above; this mount, like /golden and /upper, is never listed
+	# in fstab - it simply carries through switch_root as an
+	# already-mounted filesystem at its path, same mechanism that keeps
+	# /golden and /upper alive post-pivot.
+	mkdir -p "${rootmnt}/var/lib/rancher/k3s/agent/containerd"
+	if ! blkid "${CONTAINERD_DEV}" >/dev/null 2>&1; then
+		echo "iscsi-overlay: formatting ${CONTAINERD_DEV} (first boot)" > /dev/kmsg
+		mkfs.ext4 -F -q "${CONTAINERD_DEV}"
+	fi
+	echo "iscsi-overlay: mounting containerd storage ${CONTAINERD_DEV}" > /dev/kmsg
+	mount -t ext4 "${CONTAINERD_DEV}" "${rootmnt}/var/lib/rancher/k3s/agent/containerd"
+
+	# The golden tree's /etc still carries NFS-root-mode leftovers
+	# (fstab's own NFS root line, cluster-overlay.service enabled) -
+	# confirmed 2026-08-15 the hard way these are genuinely still active
+	# on an overlay-mode boot, not just harmless cruft: cluster-overlay's
+	# setup-overlays.sh bind-mounts /etc,/var,/root,/home,/tmp from NFS
+	# over this root and remounts /var/lib/rancher/k3s onto tmpfs - the
+	# exact "containerd can't sit on NFS" workaround this whole overlay
+	# design exists to replace with real block storage. Left running, it
+	# silently undoes the entire point (k3s state wiped every reboot
+	# again) with zero visible error. populate_node_root_lun.yml already
+	# does the equivalent fix for the single-session design, from
+	# k8smaster before first boot - this design's delta is formatted
+	# fresh at boot instead, so the fix runs here, once, first boot only,
+	# directly against the just-assembled overlay (removing a file that
+	# only exists in the read-only golden layer correctly creates a
+	# whiteout in the writable delta, standard overlayfs behavior - this
+	# persists across every later boot without needing to repeat it).
+	if [ "$FIRST_BOOT" = true ]; then
+		echo "iscsi-overlay: disabling cluster-overlay.service and fixing fstab (first boot)" > /dev/kmsg
+		rm -f "${rootmnt}/etc/systemd/system/multi-user.target.wants/cluster-overlay.service"
+		rm -f "${rootmnt}/etc/systemd/system/remote-fs.target.wants/cluster-overlay.service"
+		cat > "${rootmnt}/etc/fstab" <<-EOF
+			proc            /proc           proc    defaults          0       0
+		EOF
+	fi
+}

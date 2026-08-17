@@ -1,0 +1,56 @@
+---
+# Shared by any task that needs qcli_iscsi write access. QCLI's session
+# auth is separate from the SSH key already used for every other QNAP
+# task in this project (qnap_backup_dirs, qnap_exports, etc.) - confirmed
+# 2026-08-11 that being SSH'd in as `admin` does not satisfy it. This
+# logs in once with saveauthsid=yes, which QTS persists on the NAS side,
+# so later qcli_iscsi calls in the same play don't need a sid= param.
+#
+# Deliberately NOT `ansible.builtin.raw` with the password Jinja-
+# interpolated into the command line - confirmed 2026-08-12 that this
+# fails (auth rejected) even with a correct password and no shell-
+# special characters in it, for the same class of reason the original
+# Phase 0 spike already hit: passing a secret through a remote command
+# line is fragile in ways piping it via stdin isn't. This instead
+# replicates the exact technique that was proven to work during Phase 0
+# - `cat <password file> | ssh ... "read PW; qcli -l ... pw=\"\$PW\""` -
+# run locally (delegate_to: localhost, which has bash/ssh/cat, unlike
+# the QNAP's BusyBox shell) rather than via Ansible's raw connection
+# plumbing, since raw has no stdin-injection parameter to do this the
+# "native" way.
+#
+# run_once: true - `hosts: all` in this inventory resolves to both
+# `k8smaster` and `localhost` (the same physical machine) - see
+# install_iscsi_initiator.yml's header comment for how double-execution
+# was found and confirmed as a real bug, not a hypothetical.
+#
+# become: false, explicitly - the play this runs under sets
+# `become: true` at the play level (needed for the apt/chroot/dd tasks
+# elsewhere in this role), which becomes the default for every task
+# including this one even under delegate_to: localhost. Confirmed
+# 2026-08-12: without the override, this ran as root via sudo, so `~`
+# in ansible_ssh_private_key_file expanded to /root instead of the
+# real user's home, and the SSH key was never found.
+
+- name: Log in to QCLI via stdin (session persisted on the NAS via saveauthsid)
+  ansible.builtin.shell:
+    cmd: >-
+      cat {{ qnap_qcli_password_file }} |
+      ssh -i {{ hostvars[groups['qnap'][0]].ansible_ssh_private_key_file }}
+      -o StrictHostKeyChecking=no
+      {{ hostvars[groups['qnap'][0]].ansible_user }}@{{ hostvars[groups['qnap'][0]].ansible_host }}
+      "IFS= read -r PW; PW=\$(echo \"\$PW\" | sed 's/^ *//;s/ *\$//');
+      /sbin/qcli -l user=admin pw=\"\$PW\" saveauthsid=yes"
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: qcli_login_result
+  changed_when: false
+  no_log: true
+
+- name: Fail if QCLI login did not succeed
+  ansible.builtin.fail:
+    msg: "QCLI login failed - check {{ qnap_qcli_password_file }}"
+  run_once: true
+  when: "'Authentication success' not in qcli_login_result.stdout"

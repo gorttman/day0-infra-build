@@ -1,0 +1,26 @@
+#!/bin/sh
+
+PREREQ=""
+
+prereqs() {
+	echo "$PREREQ"
+}
+
+case "$1" in
+	prereqs)
+		prereqs
+		exit 0
+	;;
+esac
+
+# Deliberately left as a no-op. The stock script's job here is killing
+# dropbear's own listening socket right after root mount - confirmed by
+# direct bisection (pinode-01 iSCSI-root investigation, 2026-08-15) to
+# wedge the RP1-hosted NIC every time, in the same fragile window the
+# chip is still settling from SCSI/iSCSI traffic. Never surfaced under
+# NFS-root boot because BOOT=nfs already skips part of this same script.
+# Rather than kill dropbear at this exact moment, it's left running
+# permanently instead - see dropbear-initramfs.conf.j2, which moves it
+# off port 22 so it can't conflict with the real OS's sshd once boot
+# completes.
+exit 0

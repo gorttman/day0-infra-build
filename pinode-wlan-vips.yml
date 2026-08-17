@@ -1,0 +1,76 @@
+# Standalone, deliberately NOT part of day0-infra-build.yml's plays -
+# those all use `hosts: all` against variables/cli/hosts.ini, and
+# pinode-01 has never been (and isn't here either) added to that
+# shared inventory: doing so would also pull it into unrelated plays
+# it should never run against (e.g. "Apply ArgoCD bootstrap
+# Application", which must only ever run once, from k8smaster).
+#
+# What this fixes: MetalLB's own L2 ARP announcements don't work on
+# the ARDA_HOME WLAN at all - the UniFi AP/Dream Machine proxy-answers
+# ARP from its own client table and never forwards requests to WiFi
+# clients (see day1-foundation/apps/metallb/README.md's "WLAN VIPs and
+# UniFi proxy-ARP" section, confirmed 2026-07-04 via tcpdump on both
+# nodes). The workaround - binding the WLAN-pool VIPs as /32 secondary
+# addresses directly on pinode-01's wlan0 - was applied once by hand
+# that day and documented only in that README, with no Ansible
+# encoding it. It silently disappeared at some point between then and
+# 2026-08-09 (reboot, OS update, profile reset - never determined
+# which) with nothing to notice or reapply it until it broke split-
+# horizon DNS for every WiFi client in the house. This playbook is
+# that missing piece: idempotent, one-command re-apply
+# (`ansible-playbook pinode-wlan-vips.yml -i pinode-wlan-vips.yml`
+# isn't right - see the inventory block below for how to actually run
+# it), so the next time this drifts, fixing it doesn't require
+# rediscovering the whole incident from scratch.
+#
+# Run with:
+#   ansible-playbook pinode-wlan-vips.yml -i pinode-wlan-vips-inventory.ini
+- name: Ensure pinode-01's WLAN-pool VIPs are bound on wlan0
+  hosts: pinode01
+  # Deliberately NOT become: true - Ansible's become mechanism hit a
+  # pseudo-TTY/ControlPersist interaction bug on this host (worker
+  # died mid-escalation, confirmed live 2026-08-09 with -vvv - plain
+  # passwordless `sudo -n true` over a direct SSH session worked
+  # instantly, so this isn't a real permissions problem, just
+  # become's own plumbing). Every privileged command below invokes
+  # `sudo` directly instead, matching the exact manual invocation
+  # already proven to work.
+  vars:
+    # Keep this list in sync with day1-foundation/apps/metallb's
+    # wlan-pool range (192.168.2.240-.250) - specifically, every IP in
+    # that pool actually in use by a LoadBalancer Service today.
+    # Currently: pihole-web (.240), traefik (.241), pihole-dns (.245).
+    wlan_pool_vips:
+      - "192.168.2.240/32"
+      - "192.168.2.241/32"
+      - "192.168.2.245/32"
+  tasks:
+    - name: Read current addresses on the preconfigured wlan0 connection
+      ansible.builtin.command:
+        cmd: sudo nmcli --get-values ipv4.addresses connection show preconfigured
+      register: current_addresses
+      changed_when: false
+
+    - name: Identify which WLAN-pool VIPs are missing
+      ansible.builtin.set_fact:
+        missing_vips: "{{ wlan_pool_vips | reject('in', current_addresses.stdout) | list }}"
+
+    # Deliberately a raw nmcli command, not community.general.nmcli's
+    # `ip4` parameter - that parameter SETS ipv4.addresses outright, it
+    # doesn't append. Looping it per-VIP would have each iteration
+    # overwrite the previous one, leaving only the last address bound
+    # instead of all three - caught before this ever ran for real.
+    # `+ipv4.addresses` (this exact form, proven live 2026-08-09) is
+    # the actual additive syntax.
+    - name: Add any missing WLAN-pool VIPs as secondary addresses
+      when: missing_vips | length > 0
+      ansible.builtin.command:
+        cmd: >-
+          sudo nmcli connection modify preconfigured
+          {{ missing_vips | map('regex_replace', '^(.*)$', '+ipv4.addresses \1') | join(' ') }}
+      notify: Reactivate preconfigured connection
+
+  handlers:
+    - name: Reactivate preconfigured connection
+      ansible.builtin.command:
+        cmd: sudo nmcli connection up preconfigured

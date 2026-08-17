@@ -4,6 +4,8 @@ tmp.*
 *.out
 *.tmp
 *.bak
+netconsole.log*
+.claude/
 
 # Ansible runtime
 *.retry

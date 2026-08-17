@@ -1,0 +1,120 @@
+---
+# iSCSI portal - wired QNAP face only, deliberately. The Phase 0 spike
+# found `iscsiadm -m discovery` returns the target on both the QNAP's
+# wired (192.168.1.30) and WLAN (192.168.2.30) portals, and login
+# succeeds on both - two sessions to one target. Every task here pins
+# -p {{ qnap_iscsi_portal }} explicitly so cluster storage traffic never
+# depends on the WLAN path, which exists for a different purpose entirely
+# (see project memory: MetalLB VIPs on pinode-01's wlan0).
+qnap_iscsi_portal: "192.168.1.30"
+
+# This QNAP's storage pool has 0 Bytes free at the pool level - the
+# entire 21.8TB pool is already claimed by one static volume (confirmed
+# 2026-08-11). Every LUN here must be LUNType=File against this
+# volumeID, never LUNType=Block/poolID - Block allocation will fail with
+# "Max Lun size is 0.00 KB!" on this NAS as configured today.
+qnap_iscsi_volume_id: 1
+
+# qcli target Name/Alias fields are QNAP-restricted to 1-16 alphanumeric
+# characters, no hyphens or other punctuation (confirmed the hard way
+# during the Phase 0 spike - "phase0-test" was rejected, "phase0test"
+# was not). Every name below is deliberately built to satisfy that.
+
+# Golden (shared, read-only) image LUN/target - same target/LUN for
+# every node, mirroring how every node already shares one NFS export.
+iscsi_golden_lun_name: "goldenimg"
+iscsi_golden_target_name: "goldenimg"
+iscsi_golden_lun_capacity_gb: 4
+
+# Per-node root LUN/target - a genuinely different design from the
+# original two-target overlay approach (retired 2026-08-15): that
+# design needed a SECOND concurrent iscsi_tcp session on top of the
+# golden target's own session, and every single real-hardware boot
+# attempt crashed the board hard (no panic, kernel ring buffer just
+# stops) at or immediately after whichever iscsistart/iscsiadm call
+# opened that second session - confirmed order-independent, confirmed
+# not a memory issue (7.8GB free of 8GB at the crash point), across 5
+# separate diagnostic attempts including switching login tools
+# entirely. Neither a well-known reference article
+# (matt.olan.me/posts/2020-12-29-raspberry-pi-iscsi-root-on-ubuntu-20-04)
+# nor a long Raspberry Pi forum thread on iSCSI-root setups
+# (forums.raspberrypi.com/viewtopic.php?t=274553) show anyone running
+# two concurrent sessions this early in boot either - every real-world
+# precedent found is strictly single-session. This design sidesteps the
+# crash entirely by never needing a second session: each node's LUN
+# holds a full, standalone copy of the OS (populated from the golden
+# tree via provision_node_root_lun.yml), and boots through the stock,
+# Raspberry-Pi-OS-maintained scripts/local-top/iscsi hook - re-enabled,
+# not reinvented - exactly the single-target pattern both of those
+# references use.
+#
+# 50GB, not the article's 64GB or this project's earlier 2GB (which was
+# sized only for a writable delta, not a full OS) - base OS is 4.3GB
+# uncompressed; realistic headroom for containerd's image cache (the
+# same class of growth that started this whole migration - Jellyfin)
+# plus logs pushes comfortably past that. Storage capacity itself is a
+# non-issue on this QNAP (14.2TB free at the volume level, not the
+# oft-misleading 0-byte pool-level reading noted above) - sized for
+# years of headroom, not tightly, since a resize later is trivial
+# (rebuild from a fresh golden image, same provisioning task).
+#
+# Name suffix "rt" (root), not "wr" (writable-delta) - deliberately
+# distinct from the old per-node LUN name so this new LUN can't be
+# confused with the old 2GB one on the QNAP during the transition; the
+# old one needs its own separate cleanup, not silently reused here.
+iscsi_node_lun_capacity_gb: 50
+iscsi_node_target_name: "pi{{ node_mac_suffix }}rt"
+iscsi_node_lun_name: "pi{{ node_mac_suffix }}rt"
+
+# Per-node writable delta LUN/target for the two-target overlay design
+# (re-attempted 2026-08-16 after finding its original "crashes on the
+# second session" symptom was actually the dropbear-kill bug fixed in
+# install_iscsi_initiator.yml, not something inherent to concurrent
+# sessions - see that file's own comment for the full story). Genuinely
+# small - it only ever holds the delta on top of the shared golden
+# squashfs, not a full OS copy like the "rt" LUN above.
+#
+# Suffix "ov" (overlay), not the original design's "wr" - that old LUN
+# (pi{{ node_mac_suffix }}wr) accumulated corrupted QCLI database state
+# from manual configfs cleanup during the same night's debugging and
+# was abandoned rather than fought further; "ov" starts clean and keeps
+# this design unambiguous from whatever's left of the old one.
+iscsi_node_delta_lun_capacity_gb: 2
+iscsi_node_delta_target_name: "pi{{ node_mac_suffix }}ov"
+iscsi_node_delta_lun_name: "pi{{ node_mac_suffix }}ov"
+
+# Per-node containerd-storage LUN/target - discovered necessary
+# 2026-08-16, first real k3s-agent join attempt under the overlay
+# design: containerd's overlayfs snapshotter refused to start
+# ("filesystem on top of overlayfs not supported as upperdir") because
+# /var/lib/rancher/k3s/agent/containerd lives inside the outer overlay
+# root itself - the kernel does not support stacking one overlayfs
+# mount's upperdir on top of another overlayfs. Growing the 2GB delta
+# LUN above would not have fixed this even at any size - it's a
+# structural restriction, not a capacity one. Fix: a third, genuinely
+# separate real-ext4 block device, mounted directly onto
+# ${rootmnt}/var/lib/rancher/k3s/agent/containerd in mountroot() itself
+# (after the overlay is assembled), bypassing overlayfs semantics
+# entirely for that one path - completing this design's actual goal
+# (persistent, non-tmpfs k3s state) rather than a tangent from it.
+#
+# 24GB, not the 2GB delta's size - containerd image/layer storage is a
+# fundamentally different growth pattern (k8smaster's own equivalent
+# directory is already 38GB with a fuller workload); QNAP capacity is a
+# non-issue (14TB+ free), so sized for headroom rather than tightly.
+# Suffix "cd" (containerd) to stay unambiguous from "ov" (the root
+# delta) and "rt"/"wr" (retired single-session designs).
+iscsi_node_containerd_lun_capacity_gb: 24
+iscsi_node_containerd_target_name: "pi{{ node_mac_suffix }}cd"
+iscsi_node_containerd_lun_name: "pi{{ node_mac_suffix }}cd"
+
+# Where the golden squashfs gets built before being written to its LUN.
+# Lives on k8smaster's real local disk (nfs_os_path's parent), not NFS.
+iscsi_golden_image_build_path: "/srv/nfs/iscsi-golden-image"
+
+# QCLI's own session auth is separate from SSH key auth to the QNAP
+# (confirmed 2026-08-11 - being SSH'd in as `admin` is not enough, qcli
+# write commands demand `qcli -l` first). Read from an untracked file,
+# same pattern as this repo's other credentials/ contents - never commit
+# this. File contains exactly the QTS admin password, nothing else.
+qnap_qcli_password_file: "{{ playbook_dir }}/credentials/qnap-admin-password.txt"

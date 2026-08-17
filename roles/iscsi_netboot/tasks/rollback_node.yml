@@ -1,0 +1,33 @@
+---
+# Rolls one node back from iSCSI-root to NFS-root boot mode. This is
+# deliberately thin - the actual rollback mechanism is just re-running
+# nfs_netboot's own cmdline.txt/config.txt render for this one node,
+# the same task that already renders it for every NFS-mode node. No
+# separate rollback code path exists to drift out of sync with the
+# real NFS-mode render logic.
+#
+# Required var: node_name (must match an entry in the `nodes` list
+# nfs_netboot expects - this task passes a single-item list built from
+# node_name, not the full fleet, so only this one node's files change).
+#
+# Does NOT touch this node's QNAP LUN/target - they're left in place
+# (cheap to keep, and converting back to iscsi mode later needs them
+# again). Remove them by hand via qcli_iscsi if actually decommissioning
+# iSCSI for this node entirely, not just rolling back a test.
+#
+# Like convert_node.yml, this only rewrites TFTP config - it does NOT
+# reboot the node. Takes effect on next reboot.
+
+- name: Fail fast if node_name is missing
+  ansible.builtin.assert:
+    that:
+      - node_name is defined
+    fail_msg: "rollback_node.yml requires node_name to be set."
+
+- name: Re-render this node's NFS boot config (the actual rollback)
+  ansible.builtin.include_role:
+    name: nfs_netboot
+    tasks_from: setup_tftp_structure
+  vars:
+    nodes:
+      - name: "{{ node_name }}"

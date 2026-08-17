@@ -13,7 +13,10 @@ tftp_root: "/var/www/html/netboot/rpi5"
 # Network
 nfs_server_ip: "192.168.1.10"
 nfs_network: "192.168.1.0/27"
-nfs_mount_opts: "vers=4.2,hard,timeo=600,retrans=10,noacl,nocto"
+# vers=3, not 4.x - see day0_nfs_prep.yml's matching comment. The
+# initramfs's klibc nfsmount tool has no NFSv4 support at all (rejects
+# both "4.2" and plain "4" outright) - confirmed live 2026-08-12.
+nfs_mount_opts: "vers=3,hard,timeo=600,retrans=10,noacl,nocto"
 
 # Kernel cmdline written into each node's cmdline.txt
 kernel_params: >-
