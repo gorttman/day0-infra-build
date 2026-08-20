@@ -25,6 +25,17 @@
 #
 # Run with:
 #   ansible-playbook pinode-wlan-vips.yml -i pinode-wlan-vips-inventory.ini
+#
+# 2026-08-20 addition: binding the VIP addresses alone isn't the whole
+# fix - proxy_arp on wlan0 also has to be enabled for pinode-01 to
+# actually answer other WiFi clients' ARP requests for them (confirmed
+# live: addresses were still correctly bound after the same-day reboot,
+# but proxy_arp had reset to 0, and an iPad on the ARDA_HOME WLAN
+# couldn't resolve immich.i3sec.com.au - "host not found" - because its
+# DNS query to the pihole VIP never reached pinode-01 at all; pihole's
+# own query log showed nothing from the iPad). Same root cause as the
+# address loss (nothing reapplies either setting at boot), so both are
+# fixed by the same playbook now.
 - name: Ensure pinode-01's WLAN-pool VIPs are bound on wlan0
   hosts: pinode01
   # Deliberately NOT become: true - Ansible's become mechanism hit a
@@ -69,6 +80,33 @@
           sudo nmcli connection modify preconfigured
           {{ missing_vips | map('regex_replace', '^(.*)$', '+ipv4.addresses \1') | join(' ') }}
       notify: Reactivate preconfigured connection
+
+    - name: Check current proxy_arp state on wlan0
+      ansible.builtin.command:
+        cmd: cat /proc/sys/net/ipv4/conf/wlan0/proxy_arp
+      register: proxy_arp_current
+      changed_when: false
+
+    - name: Enable proxy_arp on wlan0 now (live, immediate effect)
+      when: proxy_arp_current.stdout | trim != "1"
+      ansible.builtin.command:
+        cmd: sudo sysctl -w net.ipv4.conf.wlan0.proxy_arp=1
+
+    - name: Read current sysctl.d persistence file for proxy_arp (if any)
+      ansible.builtin.command:
+        cmd: cat /etc/sysctl.d/99-wlan0-proxy-arp.conf
+      register: proxy_arp_file_current
+      changed_when: false
+      failed_when: false
+
+    # sudo tee, not a `>` redirect - same reasoning as nmcli above:
+    # redirection needs a shell, and command module output here matches
+    # this file's own established idiom of avoiding one.
+    - name: Persist proxy_arp=1 for wlan0 across reboots
+      when: "'net.ipv4.conf.wlan0.proxy_arp = 1' not in proxy_arp_file_current.stdout"
+      ansible.builtin.command:
+        cmd: sudo tee /etc/sysctl.d/99-wlan0-proxy-arp.conf
+        stdin: "net.ipv4.conf.wlan0.proxy_arp = 1\n"
 
   handlers:
     - name: Reactivate preconfigured connection
