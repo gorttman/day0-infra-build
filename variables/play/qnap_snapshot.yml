@@ -33,6 +33,10 @@ qnap_snapshot_monthly_keep: 13
 qnap_snapshot_sources:
   - name: books
     path: /share/CACHEDEV1_DATA/books
+    # Producer-driven change detection (books-pipeline touches this after
+    # a real promotion) - see roles/qnap_snapshot/HISTORY.md #2. Only
+    # source wired to this so far; the other 7 still sync unconditionally.
+    flag_file: .snapshot-pending
   - name: vault
     path: /share/CACHEDEV1_DATA/vault
   - name: immich

@@ -52,28 +52,56 @@
     mkdir -p "$TODAY_DIR"
 
     {% for src in qnap_snapshot_sources %}
+    {% if src.flag_file is defined %}
+    # flag_file sources (see roles/qnap_snapshot/README or the producer
+    # that touches this) only get the real rsync - the expensive
+    # full-tree walk against the live source - when the producer has
+    # actually written something since the last run. A quiet night costs
+    # one stat() here instead of a --link-dest diff over the whole tree,
+    # which is the entire point: this is what stops a many-file, mostly-
+    # unchanged source from paying full metadata-scan cost every single
+    # night regardless of whether anything happened.
+    if [ -f "{{ src.path }}/{{ src.flag_file }}" ]; then
+      echo "[*] Syncing {{ src.name }} (flagged pending)"
+      if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}{{ src.name }}" ]; then
+        rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}--exclude={{ src.flag_file }} --link-dest="${PREV_DIR}{{ src.name }}" "{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
+      else
+        rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}--exclude={{ src.flag_file }} "{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
+      fi
+      rm -f "{{ src.path }}/{{ src.flag_file }}"
+    else
+      echo "[*] Skipping {{ src.name }} (nothing flagged since last run)"
+    fi
+    {% else %}
     echo "[*] Syncing {{ src.name }}"
     if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}{{ src.name }}" ]; then
       rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}--link-dest="${PREV_DIR}{{ src.name }}" "{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
     else
       rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}"{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
     fi
+    {% endif %}
     {% endfor %}
 
-    # Promotion hardlink-clones today's already-complete snapshot into
-    # the weekly/monthly tiers (source and link-dest are the same
-    # directory, so every file matches and rsync hardlinks the lot
-    # instead of copying) - not a re-sync from the original sources, so
-    # this costs one pass over already-local data, not the network/disk
-    # I/O of touching the primary exports again.
-    if [ "$DOW" = "7" ]; then
-      echo "[*] Promoting to weekly"
-      rsync -a --link-dest="$TODAY_DIR/" "$TODAY_DIR/" "$WEEKLY_DIR/$WEEK_TAG/"
+    # Promotion is per-source and looks up each source's own most recent
+    # daily generation, rather than assuming $TODAY_DIR has everything -
+    # a flag_file source skipped tonight still needs to land in this
+    # week's/month's tier, just from an older day's folder instead of
+    # today's. Only a directory-listing lookup to find the right day;
+    # the actual hardlink-clone walk still only happens at weekly/monthly
+    # cadence per source, same as before this change.
+    {% for src in qnap_snapshot_sources %}
+    SRC_DAILY_DIR=$(ls -1dt "$DAILY_DIR"/*/{{ src.name }} 2>/dev/null | head -1)
+    if [ -n "$SRC_DAILY_DIR" ]; then
+      if [ "$DOW" = "7" ]; then
+        echo "[*] Promoting {{ src.name }} to weekly"
+        rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$WEEKLY_DIR/$WEEK_TAG/{{ src.name }}/"
+      fi
+      if [ "$DOM" = "01" ]; then
+        echo "[*] Promoting {{ src.name }} to monthly"
+        rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$MONTHLY_DIR/$MONTH_TAG/{{ src.name }}/"
+      fi
     fi
-    if [ "$DOM" = "01" ]; then
-      echo "[*] Promoting to monthly"
-      rsync -a --link-dest="$TODAY_DIR/" "$TODAY_DIR/" "$MONTHLY_DIR/$MONTH_TAG/"
-    fi
+    {% endfor %}
 
     # prune_generations <dir> <keep>
     prune_generations() {
