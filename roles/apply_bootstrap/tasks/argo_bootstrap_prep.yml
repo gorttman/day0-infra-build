@@ -60,3 +60,51 @@
                   medium: Memory
                   sizeLimit: 2Gi
 
+- name: Wait for argocd-application-controller StatefulSet to exist before patching it
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: StatefulSet
+    namespace: argocd
+    name: argocd-application-controller
+  register: app_controller_sts
+  until: app_controller_sts.resources | length > 0
+  retries: 30
+  delay: 5
+
+# The upstream install.yaml ships argocd-application-controller with no
+# resources block at all - which means BestEffort QoS, the first thing
+# the kernel OOM-kills whenever the NODE comes under memory pressure,
+# regardless of this container's own footprint. Confirmed live
+# 2026-08-22: 180 restarts over 3+ days, all OOMKilled (exit 137), on
+# k8smaster - a single 16GB node also carrying the full ArgoCD control
+# plane, several pinned app workloads (paperless, immich-machine-learning,
+# arr-stack, vscode-server), and periodic books-pipeline jobs. Idle usage
+# was only ~270-300Mi, nowhere near a container-level limit - this was
+# never the controller's own memory footprint causing the problem, it
+# was the designated first victim any time anything else on that
+# crowded node spiked. A real request moves it to Burstable QoS so it's
+# no longer first in line; the limit leaves comfortable headroom above
+# observed idle usage for reconciliation-time spikes across the 37
+# Applications it manages, without being so large it starves the rest
+# of the node.
+- name: Patch argocd-application-controller's resource requests/limits (fix OOM crash-loop)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: StatefulSet
+    namespace: argocd
+    name: argocd-application-controller
+    merge_type: strategic-merge
+    definition:
+      spec:
+        template:
+          spec:
+            containers:
+              - name: argocd-application-controller
+                resources:
+                  requests:
+                    cpu: 250m
+                    memory: 512Mi
+                  limits:
+                    cpu: "1"
+                    memory: 1536Mi
+

@@ -29,42 +29,52 @@ qnap_nfs_config_file: /etc/config/nfssetting
 # see day2-services project_qnap_backup_design memory for the full
 # debugging trail.
 qnap_nfs_squash:
+  - path: /share/external/DEV3302_1
+    value: no_root_squash,no_root_squash
   - path: /share/CACHEDEV1_DATA/pihole
     value: no_root_squash,no_root_squash
   - path: /share/CACHEDEV1_DATA/calibre-web
     value: no_root_squash,no_root_squash
 
 # Full-ACL managed exports (roles/qnap_exports/tasks/ensure_acl.yml) -
-# for exports whose client-rule *count* changes, not just a squash
-# value on an unchanged rule set. /backup widened 2026-08-14 to cover
-# both home subnets (192.168.1.0/24 wired, 192.168.2.0/24 WLAN) with
-# rw + no_root_squash, for a traveling DHCP client (a Mac) rather than
-# pinning specific IPs that won't survive a lease change. Deliberately
-# scoped to the LAN only, not exposed beyond it - this is acceptable on
-# a private home network under this project's threat model (see
-# day2-services project_qnap_backup_design memory), NOT something to
-# copy for an internet-facing export. Collapsing to two /24 rules
-# rather than keeping k8smaster/pinode-01's old specific /32 entries
-# alongside a new subnet rule - the /24s already cover both.
-qnap_nfs_acl:
+# a MODIFY-only mechanism for an export that already exists: it checks
+# each section's current line against the desired one and sed-replaces
+# it if different, but a sed `s|^path = .*$|...|` matches nothing if
+# the line is entirely absent, not just wrong. Real gap found live
+# 2026-08-22: /backup's entire nfssetting registration (all 6 sections)
+# was found completely gone after a QNAP reboot - this list alone would
+# have silently done nothing to fix that, since there was no existing
+# line to replace. Kept empty for now - nothing currently needs
+# modify-only handling of an export whose line always exists but drifts
+# in value; use this if that situation comes up again, but see
+# qnap_nfs_new_exports below for anything that might need to be
+# (re)created from nothing, which is the more robust default.
+qnap_nfs_acl: []
+
+# New exports created from scratch (roles/qnap_exports/tasks/create_export.yml) -
+# checks each section for the path's presence and inserts a fresh line
+# if missing, which is why /backup lives here now rather than in
+# qnap_nfs_acl above: found live 2026-08-22 that a QNAP reboot wipes an
+# EXTERNAL/USB disk's entire nfssetting registration (all 6 sections),
+# even though the disk itself, its smb.conf Shared Folder registration,
+# and every INTERNAL-pool export (pihole, calibre-web, confirmed
+# unaffected by the same reboot) all survive fine. QTS evidently treats
+# external storage as needing fresh NFS permission registration on
+# every boot, unlike fixed internal-pool volumes - re-running this same
+# Ansible (`qnap-manage.yml --tags manage_qnap_exports`) after any
+# future QNAP reboot is the fix, not a one-off manual patch. ACL here
+# matches the 2026-08-14 widening: both home subnets, rw +
+# no_root_squash, for a traveling DHCP client (a Mac) rather than
+# pinning specific IPs that won't survive a lease change - see
+# day2-services project_qnap_backup_design memory. Deliberately LAN-only,
+# not something to copy for an internet-facing export.
+qnap_nfs_new_exports:
   - path: /share/external/DEV3302_1
     allow_ip: "192.168.1.0/24,192.168.2.0/24"
     permission: "rw,rw"
     squash: "no_root_squash,no_root_squash"
     anon_uid: "1000,1000"
     anon_gid: "100,100"
-
-# New exports created from scratch (roles/qnap_exports/tasks/create_export.yml),
-# as opposed to qnap_nfs_squash above which only ever modifies a setting
-# on an export that already exists. Modeled directly on the existing
-# paperless/media entries - plain two-host (k8smaster, pinode-01),
-# no_root_squash, unmapped-uid exports. Once created here, both are also
-# listed in qnap_nfs_squash above so ensure_squash.yml keeps enforcing
-# their squash setting long-term, the same as every other managed export.
-#
-# pihole and calibre-web moving off the backup disk's active_backup/ and
-# onto the main pool - see variables/play/qnap_main_pool_dirs.yml for why.
-qnap_nfs_new_exports:
   - path: /share/CACHEDEV1_DATA/pihole
     allow_ip: "192.168.1.10,192.168.1.11"
     permission: "rw,rw"

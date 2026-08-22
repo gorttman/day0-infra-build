@@ -103,3 +103,43 @@
       rsync -rlpt --delete {{ playbook_dir }}/credentials/ {{ credentials_backup_dest }}/
       >> /var/log/credentials-backup-sync.log 2>&1; else
       echo "$(date -Iseconds) ERROR: {{ credentials_backup_dest | dirname }} is not mounted - refusing to sync, this would otherwise write to local disk" >> /var/log/credentials-backup-sync.log; fi
+
+# Real, live incident 2026-08-22: a QNAP reboot silently wiped
+# /backup's entire NFS export registration (all 6 nfssetting sections -
+# QTS evidently re-registers external/USB storage exports fresh on
+# every boot, unlike fixed internal-pool volumes, which survived the
+# same reboot untouched). postgres-backup wrote directly to /mnt/backup
+# via hostPath, so the CronJob just hung for its full 30-minute
+# activeDeadlineSeconds and failed, three nights running, before this
+# was even noticed. Decoupling "did tonight's dump succeed" from "is
+# the QNAP export currently reachable" this way means the dump itself
+# no longer depends on QNAP/NFS state at all - only this separate sync
+# step does, and it fails loud (same mountpoint-guard pattern as
+# credentials-sync above) rather than hanging a Job.
+- name: Ensure postgres-backup's local staging directory exists with correct ownership
+  ansible.builtin.file:
+    path: "{{ postgres_backup_staging_dir }}"
+    state: directory
+    owner: "{{ postgres_backup_staging_uid }}"
+    group: "{{ postgres_backup_staging_gid }}"
+    mode: "0755"
+
+# Deliberately a plain cron entry, not folded into the CronJob's own
+# container - postgres-backup's image is plain postgres:16.9-alpine,
+# no SSH/rsync-to-remote capability, and adding that to a database
+# image is more surface area than reusing what's already proven here
+# for exactly this shape of problem (credentials-sync above).
+# --delete makes the QNAP side a mirror of local staging, so
+# backup.sh's own daily/weekly/monthly pruning (which now runs against
+# local disk) is what actually controls retention on both ends - this
+# step only ever reconciles, never decides what to keep.
+- name: Install sync of postgres-backup staging to the QNAP
+  ansible.builtin.cron:
+    name: "Sync postgres-backup staging to QNAP"
+    minute: "45"
+    hour: "2"
+    job: >-
+      if mountpoint -q {{ postgres_backup_sync_dest | dirname | dirname }}; then
+      rsync -rlpt --delete {{ postgres_backup_staging_dir }}/ {{ postgres_backup_sync_dest }}/
+      >> /var/log/postgres-backup-sync.log 2>&1; else
+      echo "$(date -Iseconds) ERROR: {{ postgres_backup_sync_dest | dirname | dirname }} is not mounted - refusing to sync, this would otherwise write to local disk" >> /var/log/postgres-backup-sync.log; fi

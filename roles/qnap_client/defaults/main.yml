@@ -95,3 +95,16 @@ qnap_host_mounts:
 # target - so this gets its own clearly-named subdirectory rather than
 # landing at the export root.
 credentials_backup_dest: /mnt/backup/k8smaster-credentials
+
+# postgres-backup's local staging directory on k8smaster - see the
+# staging-then-sync task below for why. Not under /mnt/ deliberately:
+# that prefix means "an actual external mount" everywhere else in this
+# role, and this is real local disk on purpose.
+postgres_backup_staging_dir: /var/lib/postgres-backup-staging
+# Same uid/gid the postgres-backup CronJob's securityContext runs as
+# (day2-services apps/postgres/postgres-backup-cronjob.yml) - the
+# container writes as this uid via hostPath, unmapped, same as it
+# always has been against the QNAP export.
+postgres_backup_staging_uid: 70
+postgres_backup_staging_gid: 70
+postgres_backup_sync_dest: /mnt/backup/active_backup/postgres
