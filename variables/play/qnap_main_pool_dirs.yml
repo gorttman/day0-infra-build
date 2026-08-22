@@ -30,3 +30,11 @@ qnap_main_pool_dirs:
   - path: calibre-web
     uid: 0
     gid: 0
+  # log-archiver's CronJob runs privileged/root (no explicit runAsUser),
+  # same as pihole/calibre-web's sidecars - same ownership. Was a fully
+  # manual QNAP step (rebuild-runbook.md Step 5) before this; folded in
+  # 2026-08-22 as part of the disaster-recovery audit, see qnap_nfs_exports.yml
+  # for the matching export registration.
+  - path: syslog-archive
+    uid: 0
+    gid: 0

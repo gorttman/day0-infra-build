@@ -87,3 +87,13 @@ qnap_nfs_new_exports:
     squash: "no_root_squash,no_root_squash"
     anon_uid: "65534,65534"
     anon_gid: "65534,65534"
+  # Was a fully manual step (rebuild-runbook.md Step 5) - folded in
+  # 2026-08-22 as part of the disaster-recovery audit. Same allow_ip
+  # pattern as pihole/calibre-web (log-archiver has no nodeSelector, so
+  # it could land on either node).
+  - path: /share/CACHEDEV1_DATA/syslog-archive
+    allow_ip: "192.168.1.10,192.168.1.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"

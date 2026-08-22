@@ -108,42 +108,33 @@ This:
 
 > **Note — per-node /etc overlay:** Each worker's `/etc` is a separate NFS overlay from `cluster/<node>/etc/`, masking the base rootfs. The `add_node` task handles this automatically for both rsyslog (`roles/nfs_netboot/tasks/setup_rsyslog_overlay.yml` — copies `rsyslog.conf` and the forwarding config into the node's overlay, creates `var/spool/rsyslog`) and the k3s agent join (`roles/nfs_netboot/tasks/setup_k3s_agent_overlay.yml` — writes `/etc/rancher/k3s/config.yaml` with the server URL, join token, and `node-ip`, copies in the `k3s-agent.service` unit, and enables it). No manual steps needed for nodes onboarded via `--tags manage_nodes`.
 
+> **Note — node onboarding now defaults to iSCSI-root, not NFS-root** (since 2026-08-17, see `roles/iscsi_netboot` and project memory `pinode01-iscsi-final` — this section above describes the legacy NFS-root path, still real and still used by `-e boot_mode=nfs`, but no longer what a plain `--tags manage_nodes` run onboards a new node onto). The iSCSI path has its own prerequisite this runbook doesn't otherwise cover: a golden image + LUN must already exist on the QNAP (`ansible-playbook day0-infra-build.yml --tags manage_iscsi`, run once and after any OS/kernel update — see `roles/iscsi_netboot/README.md` for the full sequence) before any node can be converted or onboarded onto it. On a from-scratch rebuild, run `--tags manage_iscsi` before `--tags manage_nodes` for this reason. Kernel is pinned to 6.12.47 in code (a real WiFi regression in 6.18.39, `roles/iscsi_netboot/tasks/install_iscsi_initiator.yml` enforces the pin) — don't let an unrelated apt upgrade silently move past it.
+
 ---
 
-## Step 5 — Manual: QNAP NAS export
+## Step 5 — QNAP: syslog-archive export
 
-The log-archiver CronJob mounts `/syslog-archive` from valinor-m (192.168.1.30). This is not automated.
+The log-archiver CronJob mounts `/syslog-archive` from valinor-m (192.168.1.30).
 
+**Directory + NFS permissions are automated** (as of 2026-08-22) via:
 ```bash
-ssh admin@192.168.1.30   # password: admin
+ansible-playbook qnap-manage.yml --tags manage_qnap_main_pool_dirs,manage_qnap_exports
 ```
+This creates `/share/CACHEDEV1_DATA/syslog-archive` and writes all 6
+`nfssetting` sections correctly — but confirmed live that this alone
+does **not** make the export actually appear (`showmount -e` won't
+list it, `/etc/exports` won't contain it), because QTS needs the
+directory registered as a real "Shared Folder" first, not just
+present on disk. No `qcli_*` command was found that does this
+registration. **One remaining manual step:** create the
+`syslog-archive` Shared Folder once via the QTS web UI (Control Panel
+→ Shared Folders → Create) before running the Ansible above — after
+that one-time registration, this automation correctly manages its
+permissions on every future run, same as pihole/calibre-web.
 
-Edit `/etc/config/nfssetting` — add `syslog-archive` to all six sections:
+SSH access for any manual QNAP work: `ssh -i credentials/qnap_ansible_ed25519 admin@192.168.1.30` — the QTS admin account's `authorized_keys`, not the `admin`/`admin` password (retired 2026-08-07).
 
-```ini
-[Access]
-/share/CACHEDEV1_DATA/syslog-archive = TRUE
-
-[AllowIP]
-/share/CACHEDEV1_DATA/syslog-archive = *
-
-[Permission]
-/share/CACHEDEV1_DATA/syslog-archive = rw
-
-[SquashOption]
-/share/CACHEDEV1_DATA/syslog-archive = no_root_squash
-
-[AnonUID]
-/share/CACHEDEV1_DATA/syslog-archive = 65534
-
-[AnonGID]
-/share/CACHEDEV1_DATA/syslog-archive = 65534
-```
-
-Then reload:
-```bash
-/etc/init.d/nfs.sh restart
-```
+If a manual `nfssetting` edit is ever needed instead: it's `/etc/init.d/nfs restart` to reload, **not** `nfs.sh` (that script doesn't exist on this QTS version — confirmed the hard way, see `roles/qnap_exports/handlers/main.yml`).
 
 ---
 
@@ -151,9 +142,11 @@ Then reload:
 
 ArgoCD was bootstrapped in step 3. It will now pull and apply all workloads from:
 - `day0-bootstrap` → cluster-level config
-- `day1-foundation` → dhcpd, pxe-http, log-archiver, nfs-provisioner, syslog-server, sealed-secrets, cert-manager, ingress-nginx, ArgoCD apps
-- `day2-services` → pihole
+- `day1-foundation` → cluster/infra-tier apps (networking, storage provisioning, cert-manager, ingress-nginx, monitoring, and the ArgoCD Application definitions for the repos below)
+- `day2-services` → the actual self-hosted app fleet (pihole, immich, paperless, jellyfin, arr-stack, books-pipeline, calibre-web, obsidian, vscode-server, postgres, and others — this list changes often; `kubectl get applications -n argocd` is the source of truth, not this doc)
 - `dhcpd-conf` → dhcpd ConfigMap
+
+Don't treat the app names above as exhaustive or use them as a rebuild checklist — see Step 7 for the actual verification command.
 
 Monitor sync progress:
 ```bash
