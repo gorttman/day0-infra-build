@@ -63,10 +63,20 @@ Current logging covers host OS only (rsyslog → syslog-ng). Container stdout/st
 - **Metrics:** Prometheus + node-exporter DaemonSet + kube-state-metrics + Grafana
 - **Note:** sidecar approach was considered and rejected in favour of DaemonSet — covers all pods automatically without touching app manifests. Lightweight stack preferred given Pi hardware.
 
-### Chore: pre-seed pause image for new worker nodes
-On first boot, containerd is empty. k3s tries to pull `rancher/mirrored-pause:3.6` from Docker Hub when scheduling the first pod. If DNS isn't working yet the pull fails and pods stay in `ContainerCreating`.
-- **Workaround:** SSH to new node and run `k3s ctr images pull docker.io/rancher/mirrored-pause:3.6`
-- **Proper fix:** bake a k3s images tarball into the NFS base rootfs at `/var/lib/rancher/k3s/agent/images/` during `roles/nfs_netboot/tasks/configure_nfs_root_common.yml` (base rootfs chroot setup), or pre-pull in `add_node` via SSH after onboarding
+### Chore: pre-seed pause image for new worker nodes — CODE WRITTEN, NOT YET WORKING 2026-08-22
+`roles/nfs_netboot/tasks/preseed_pause_image.yml` (wired into
+`configure_nfs_root_common.yml`, so it covers both the NFS-root and
+iSCSI-root golden images - both squashfs the same `nfs_os_path`)
+attempts to export the pause image from k8smaster's own containerd
+into the base rootfs, matching the proper-fix approach below. Confirmed
+live it doesn't currently work: `k3s ctr images export` fails on a
+missing content digest, reproducibly, even right after a fresh pull
+reports everything complete - produced a 7KB file for an image that's
+really 247KB. Full detail and what to try next in that task file's own
+comment. Left wired in (idempotent, `creates:` guarded) since it's
+harmless when it fails to produce output - just doesn't yet fix the
+gap it's meant to.
+- **Workaround still applies:** SSH to new node and run `k3s ctr images pull docker.io/rancher/mirrored-pause:3.6`
 - **Details:** `docs/pi-1-inventory.md` §13
 
 ### Chore: verify kubeseal v0.27.1 matches sealed-secrets-controller version

@@ -23,3 +23,6 @@
 
 - name: Install rsyslog into base rootfs
   ansible.builtin.include_tasks: install_rsyslog_base.yml
+
+- name: Pre-seed the k3s pause image into base rootfs
+  ansible.builtin.include_tasks: preseed_pause_image.yml

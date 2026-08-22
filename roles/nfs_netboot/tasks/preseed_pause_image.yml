@@ -1,0 +1,55 @@
+################################################################################
+# FILE: roles/nfs_netboot/tasks/preseed_pause_image.yml
+################################################################################
+---
+# Fixes the BACKLOG.md "pre-seed pause image" chore: a fresh worker's
+# containerd image store is empty, and k3s tries to pull
+# rancher/mirrored-pause:3.6 from Docker Hub when scheduling the very
+# first pod - if DNS isn't up yet at that exact moment, the pull fails
+# and the pod sits in ContainerCreating with no automatic retry-once-DNS-
+# is-up. k3s-agent's own well-documented airgap mechanism auto-imports
+# any .tar/.tar.gz/.tar.zst found in /var/lib/rancher/k3s/agent/images/
+# on startup, before it ever needs to reach the network for one - this
+# task exports that one small (~250KB) image from k8smaster's own
+# already-running containerd and drops it into the base rootfs so every
+# node that images from it gets the pre-seed automatically, no per-node
+# step needed (same shape as install_k3s_agent_base.yml/
+# install_rsyslog_base.yml - prepare once against the base image, not
+# per node).
+#
+# Deliberately just this one image, not a full k3s airgap bundle -
+# BACKLOG.md's actual failure mode is specifically the pause image pull
+# racing DNS at first-pod-scheduled time; every other image a real
+# workload needs is pulled well after DNS is confirmed working.
+
+- name: Ensure the k3s agent images directory exists in base rootfs
+  ansible.builtin.file:
+    path: "{{ nfs_os_path }}/var/lib/rancher/k3s/agent/images"
+    state: directory
+    mode: '0755'
+  become: true
+
+# CAVEAT - not yet verified end-to-end, confirmed live 2026-08-22: this
+# export command fails on this host with "ctr: failed to get reader:
+# content digest ... not found", consistently, even immediately after a
+# fresh `k3s ctr images pull` reports every manifest/config as
+# "complete" - tried plain export, --platform linux/arm64-scoped
+# export, and a forced re-pull first, all three hit the exact same
+# missing digest. Looks like a real limitation in k3s's bundled `ctr`
+# specifically (not vanilla containerd), not a transient network issue.
+# Left in place as the documented intent and BACKLOG.md's tracked
+# approach, but before trusting this for a real rebuild: verify the
+# export actually produces a valid, non-truncated tar (this attempt
+# produced a 7KB file for an image `ctr images ls` itself reports as
+# 247KB) - if the same failure reproduces, look at `docker save`/
+# `crictl` as alternate export paths, or exporting from a host running
+# full upstream containerd instead of k3s's embedded build.
+- name: Export the pause image from k8smaster's own containerd into base rootfs
+  ansible.builtin.command:
+    cmd: >-
+      k3s ctr images export
+      {{ nfs_os_path }}/var/lib/rancher/k3s/agent/images/pause.tar
+      docker.io/rancher/mirrored-pause:3.6
+  become: true
+  args:
+    creates: "{{ nfs_os_path }}/var/lib/rancher/k3s/agent/images/pause.tar"
