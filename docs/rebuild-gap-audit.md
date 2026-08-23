@@ -242,6 +242,104 @@ revisiting later.
 
 ---
 
+---
+
+## 2026-08-22 follow-up audit
+
+Broader pass than the original (infra/config across all 3 repos + live
+cluster, not just `day0-infra-build`), prompted by the QNAP crash
+fallout (see project memory `qnap-crash-aug18-recovery`). Full detail
+in project memory `disaster-recovery-audit-aug22` — summarized here so
+it lives with the rest of this document's history, not just in
+assistant memory.
+
+**Re-verified, still solid:** sealed-secrets key backup/restore and the
+off-box `credentials/` sync (items 2/7 above) are still actually
+running today, not just documented as fixed — checked live job
+schedules and file timestamps, not just re-read the code.
+
+### 8. Uncommitted local-only work in this repo — RESOLVED 2026-08-22
+The qnap_snapshot flag-file mechanism (see `roles/qnap_snapshot/HISTORY.md`)
+had been sitting uncommitted, only on this one host's disk, since
+2026-08-18 — would have been lost permanently if this machine died, no
+"resync from git" recovery possible. Committed (`4335f96`). General
+lesson: uncommitted work in this repo is invisible to every rebuild/
+disaster-recovery mechanism this document is about — worth a habit of
+checking `git status` across all 3 repos periodically, not just when
+prompted by an audit.
+
+### 9. Runbook staleness — RESOLVED 2026-08-22
+Three separate drifts in `docs/rebuild-runbook.md`, all fixed
+(`32e31c2`): Step 5 documented the retired `admin`/`admin` QNAP
+password instead of the SSH key live since 2026-08-07, and a restart
+script name (`nfs.sh`) that doesn't exist on this QTS version; no
+mention anywhere that `manage_nodes` defaults to iSCSI-root (not
+NFS-root) since 2026-08-17, or that path's QNAP-side prerequisite;
+Step 6's app list was already stale (only mentioned pihole for
+`day2-services`, ~20+ apps later). Fixed the third one by making the
+text point at `kubectl get applications` instead of a hand-maintained
+list, so it can't silently go stale the same way again — worth
+applying that same "point at the live source of truth, don't
+hand-list" principle anywhere else in this doc that enumerates
+things that grow over time.
+
+### 10. `syslog-archive` QNAP export — PARTIALLY AUTOMATED 2026-08-22
+Directory + all 6 `nfssetting` sections now managed via
+`qnap_main_pool_dirs`/`qnap_exports` (`32e31c2`), matching pihole/
+calibre-web. **Confirmed live this alone does not create a working
+export** — `/etc/exports` never picked it up, `showmount -e` never
+listed it. QTS needs the directory registered as a real "Shared
+Folder" through some mechanism beyond `nfssetting` before the export
+generator will include it; no `qcli_*` command was found that does
+this (checked `qcli_storage`, `qcli_volume`). One remaining manual
+step, once: create the `syslog-archive` Shared Folder via the QTS web
+UI, then this automation manages its permissions correctly from then
+on. Likely explains why this pattern has only ever been proven for
+exports (pihole, calibre-web, `/backup`) that already existed as
+registered Shared Folders before this project's Ansible took over
+managing their permissions — nothing here has actually created a
+*new* one from nothing before now.
+
+Caused one brief, fully self-recovered NFS outage while chasing this —
+a manual `/etc/init.d/nfs restart` got cut off by an SSH command
+timeout mid-restart, leaving `nfsd` down for roughly a minute.
+`hard`-mount NFS4 clients (every mount in this project uses `hard`)
+absorbed it with zero visible impact - confirmed live mounts (`/mnt/
+books` etc.) readable immediately once the service finished starting.
+Worth remembering before manually restarting this QNAP's NFS service
+again: give it a real timeout, don't cut it off early.
+
+### 11. Pause-image preseed for new nodes — ATTEMPTED, NOT WORKING 2026-08-22
+New `roles/nfs_netboot/tasks/preseed_pause_image.yml`, wired into
+`configure_nfs_root_common.yml` so it covers both NFS-root and
+iSCSI-root golden images (`87ea981`) — both `mksquashfs` the same
+`nfs_os_path`. `k3s ctr images export` fails on a missing content
+digest reproducibly, even immediately after a fresh `k3s ctr images
+pull` reports every manifest/config as "complete" - tried a plain
+export, a `--platform linux/arm64`-scoped export, and a forced
+repull-then-export, identical failure every time (a 7KB output file
+for an image `ctr images ls` reports as 247KB). Reads as a real
+limitation in k3s's bundled `ctr` specifically, not a network/caching
+issue. Left wired in - it's idempotent and harmless when it fails
+(produces no output, not a broken one) - but genuinely not fixed.
+Next person picking this up: try `docker save`/`crictl` as alternate
+export paths, or exporting from a host running full upstream
+containerd instead of k3s's embedded build, before assuming this is a
+transient issue worth just re-running.
+
+### 12. `qnap-books`/`qnap-immich` PV drift — found, deliberately not fixed
+Live PVs have `nfs.server: qnap.i3sec.com.au` (pre-2026-08-07 FQDN
+convention); git has `nfs.server: qnap` (the short-name convention
+since then). `spec.nfs.server` is immutable on an existing PV, so this
+can never resolve via a normal ArgoCD sync no matter how long it's
+left - that's the actual reason `qnap-storage` shows permanently
+OutOfSync, not a sync bug. Fixing it for real means deleting and
+recreating two live PVs backing the photo and book libraries - real
+blast radius, deliberately left as a separate, carefully-planned
+future step rather than bundled into this audit. A from-scratch
+rebuild is unaffected (fresh PV, correct git spec from day one) - only
+the currently-running system carries this inconsistency.
+
 ## What's solid (verified against `pi-1-inventory.md` line by line)
 
 Fully captured in code and matching the live inventory exactly:
