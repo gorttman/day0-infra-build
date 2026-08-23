@@ -46,9 +46,17 @@ resource "unifi_network" "default" {
   dhcp_enabled = true
   dhcp_start   = "192.168.2.6"
   dhcp_stop    = "192.168.2.239"
-  # live: dhcpd_dns_1/dhcpd_dns_2 - k8smaster first, then the gateway
-  # itself as a fallback resolver.
-  dhcp_dns = ["192.168.2.10", "192.168.2.1"]
+  # live: dhcpd_dns_1/dhcpd_dns_2 - Pi-hole's own service VIP, then the
+  # gateway as a fallback resolver.
+  #
+  # 2026-08-23: was ["192.168.2.10", "192.168.2.1"] (k8smaster's node
+  # IP) since the 2026-08-05 apply - nothing ever listened on port 53
+  # there, so every DHCP-only WLAN client silently couldn't resolve
+  # *.i3sec.com.au for ~3 weeks (confirmed via zero real-client hits in
+  # Pi-hole's own query log). Changed manually live first to confirm
+  # Pi-hole handles being the primary DHCP resolver directly before
+  # committing it here.
+  dhcp_dns = ["192.168.2.245", "192.168.2.1"]
 
   igmp_snooping         = false
   dhcp_guarding         = false # live: dhcpguard_enabled
