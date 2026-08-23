@@ -98,12 +98,26 @@ data:
     
     
     def build_hash_index(root):
+        # The library isn't a static tree while this runs - PhotoSync (see
+        # project_immich_photo_workflow_design) writes into it live, so a
+        # file legitimately can vanish between os.walk() listing it and
+        # this hashing it (observed live: a dot-prefixed partial-sync temp
+        # file under "Brett's iPhone/Recents/" disappeared mid-scan and
+        # crashed the whole run). Skip dot-files outright (transient sync
+        # artifacts, never real content to dedupe against) and tolerate a
+        # file disappearing anyway rather than letting one race kill the
+        # entire consolidation.
         index = {}
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d not in IGNORED_LIBRARY_DIRS]
             for fname in filenames:
+                if fname.startswith("."):
+                    continue
                 fpath = os.path.join(dirpath, fname)
-                index[sha256_of(fpath)] = fpath
+                try:
+                    index[sha256_of(fpath)] = fpath
+                except OSError as e:
+                    print(f"WARN  skipping vanished/unreadable library file {fpath}: {e}", flush=True)
         return index
     
     
