@@ -206,6 +206,20 @@
     golden_k3s_token: "{{ (golden_k3s_config_raw.content | b64decode) | regex_search('^token:\\s*(\\S+)', '\\1') | first }}"
   run_once: true
 
+# flannel-iface: eth0 - the same default-route/wlan0 auto-detection bug
+# node-ip above was added to fix (2026-08-16), but for a second,
+# independent thing: flannel's own flannel.alpha.coreos.com/public-ip
+# node annotation, which k3s's embedded flannel derives from the
+# default-route interface unless told otherwise - node-ip only pins
+# kubelet's registered InternalIP, it doesn't touch this. Confirmed live
+# 2026-08-24: pinode-01's public-ip annotation was 192.168.2.11 (wlan0)
+# despite node-ip already being 192.168.1.11, so k8smaster's flannel FDB
+# entry for this node pointed at the WLAN address - cross-node pod
+# traffic (and everything that depends on it: CoreDNS, ArgoCD's own
+# repo-server/redis lookups) broke outright once that WLAN path had a
+# problem. eth0 hardcoded, not a var, since every node here shares the
+# same wired-NIC naming - unlike node_ip, there's nothing per-node to
+# parameterize.
 - name: Write this node's own k3s agent config onto its root LUN (server/token from golden, node-ip pinned to the wired backend)
   ansible.builtin.copy:
     dest: "/mnt/{{ node_name }}-root/etc/rancher/k3s/config.yaml"
@@ -213,6 +227,7 @@
       server: {{ golden_k3s_server }}
       token: {{ golden_k3s_token }}
       node-ip: {{ node_ip }}
+      flannel-iface: eth0
     mode: '0600'
   become: true
   run_once: true
