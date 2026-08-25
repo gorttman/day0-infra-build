@@ -46,17 +46,26 @@ resource "unifi_network" "default" {
   dhcp_enabled = true
   dhcp_start   = "192.168.2.6"
   dhcp_stop    = "192.168.2.239"
-  # live: dhcpd_dns_1/dhcpd_dns_2 - Pi-hole's own service VIP, then the
-  # gateway as a fallback resolver.
+  # live: dhcpd_dns_1 - Pi-hole's own service VIP. Deliberately the ONLY
+  # entry, no fallback.
   #
   # 2026-08-23: was ["192.168.2.10", "192.168.2.1"] (k8smaster's node
   # IP) since the 2026-08-05 apply - nothing ever listened on port 53
   # there, so every DHCP-only WLAN client silently couldn't resolve
   # *.i3sec.com.au for ~3 weeks (confirmed via zero real-client hits in
-  # Pi-hole's own query log). Changed manually live first to confirm
-  # Pi-hole handles being the primary DHCP resolver directly before
-  # committing it here.
-  dhcp_dns = ["192.168.2.245", "192.168.2.1"]
+  # Pi-hole's own query log).
+  #
+  # 2026-08-25: dropped the "192.168.2.1" (gateway) fallback added at
+  # the same time. Confirmed live that 192.168.2.1 forwards straight to
+  # public DNS with zero knowledge of *.i3sec.com.au - so any client
+  # that silently fell back to it (a momentary Pi-hole timeout, a race
+  # between the two servers, standard OS resolver retry behavior) got a
+  # broken public answer instead of an error, with no visible sign why.
+  # This is what was actually causing "works, then doesn't" on the
+  # iPad/TV - not device state, not caching, a bad fallback resolver.
+  # Single DNS server: if Pi-hole is ever actually down, resolution
+  # should fail loudly, not silently return a wrong answer.
+  dhcp_dns = ["192.168.2.245"]
 
   igmp_snooping         = false
   dhcp_guarding         = false # live: dhcpguard_enabled
