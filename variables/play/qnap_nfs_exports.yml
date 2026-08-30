@@ -49,7 +49,108 @@ qnap_nfs_squash:
 # in value; use this if that situation comes up again, but see
 # qnap_nfs_new_exports below for anything that might need to be
 # (re)created from nothing, which is the more robust default.
-qnap_nfs_acl: []
+#
+# 2026-08-30: populated for the VLAN20 migration. Every export's AllowIP
+# still listed the nodes at their old Cluster-Backend addresses
+# (192.168.1.10/.11), so after the move BOTH nodes were silently denied:
+# NFSv3 failed loudly ("access denied by server"), but NFSv4 mounted
+# "successfully" and just showed an EMPTY directory - which is what made
+# this look like a stale-handle/mount problem for hours rather than an
+# ACL one. /Public survived only because its AllowIP is "*", which is
+# why it was the one share that kept working.
+#
+# Also note only 4 exports were ever managed here (backup, pihole,
+# calibre-web, syslog-archive); the other 9 were live-only and had no
+# code representation at all. All 13 are now listed. /Public is
+# deliberately NOT managed - its "*" ACL works and has a different
+# shape (1 rule, not 2-3).
+#
+# ORDER IS LOAD-BEARING: the five sections are positionally paired, so
+# the Nth AllowIP entry pairs with the Nth permission/squash/anon_uid/
+# anon_gid. books' 3rd rule (the 192.168.2.0/24 home LAN) and inbox's
+# 1st are deliberately all_squash->uid 1000, unlike the node rules'
+# no_root_squash - preserved exactly as found live.
+qnap_nfs_acl:
+  - path: /share/external/DEV3302_1
+    allow_ip: "192.168.20.0/24,192.168.2.0/24"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "1000,1000"
+    anon_gid: "100,100"
+  - path: /share/CACHEDEV1_DATA/syslog-archive
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/calibre-web
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/pihole
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/cold
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/downloads
+    allow_ip: "192.168.20.10,192.168.20.11,192.168.2.*"
+    permission: "rw,rw,rw"
+    squash: "no_root_squash,no_root_squash,no_root_squash"
+    anon_uid: "65534,65534,65534"
+    anon_gid: "65534,65534,65534"
+  # "immicc" is a real typo in the QNAP-side share name, not a mistake
+  # here - the client-facing export is still /immich.
+  - path: /share/CACHEDEV1_DATA/immicc
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/media
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/paperless
+    allow_ip: "192.168.20.10,192.168.20.11"
+    permission: "rw,rw"
+    squash: "no_root_squash,no_root_squash"
+    anon_uid: "65534,65534"
+    anon_gid: "65534,65534"
+  - path: /share/CACHEDEV1_DATA/photos
+    allow_ip: "192.168.2.*,192.168.20.10,192.168.20.11"
+    permission: "rw,rw,rw"
+    squash: "no_root_squash,no_root_squash,no_root_squash"
+    anon_uid: "65534,65534,65534"
+    anon_gid: "65534,65534,65534"
+  - path: /share/CACHEDEV1_DATA/vault
+    allow_ip: "192.168.20.10,192.168.20.11,192.168.2.*"
+    permission: "rw,rw,rw"
+    squash: "no_root_squash,no_root_squash,no_root_squash"
+    anon_uid: "65534,65534,65534"
+    anon_gid: "65534,65534,65534"
+  - path: /share/CACHEDEV1_DATA/books
+    allow_ip: "192.168.20.10/32,192.168.20.11/32,192.168.2.0/24"
+    permission: "rw,rw,rw"
+    squash: "no_root_squash,no_root_squash,all_squash"
+    anon_uid: "65534,65534,1000"
+    anon_gid: "65534,65534,100"
+  - path: /share/CACHEDEV1_DATA/inbox
+    allow_ip: "192.168.2.*,192.168.20.10,192.168.20.11"
+    permission: "rw,rw,rw"
+    squash: "all_squash,no_root_squash,no_root_squash"
+    anon_uid: "1000,65534,65534"
+    anon_gid: "100,65534,65534"
 
 # New exports created from scratch (roles/qnap_exports/tasks/create_export.yml) -
 # checks each section for the path's presence and inserts a fresh line
@@ -70,19 +171,19 @@ qnap_nfs_acl: []
 # not something to copy for an internet-facing export.
 qnap_nfs_new_exports:
   - path: /share/external/DEV3302_1
-    allow_ip: "192.168.1.0/24,192.168.2.0/24"
+    allow_ip: "192.168.20.0/24,192.168.2.0/24"
     permission: "rw,rw"
     squash: "no_root_squash,no_root_squash"
     anon_uid: "1000,1000"
     anon_gid: "100,100"
   - path: /share/CACHEDEV1_DATA/pihole
-    allow_ip: "192.168.1.10,192.168.1.11"
+    allow_ip: "192.168.20.10,192.168.20.11"
     permission: "rw,rw"
     squash: "no_root_squash,no_root_squash"
     anon_uid: "65534,65534"
     anon_gid: "65534,65534"
   - path: /share/CACHEDEV1_DATA/calibre-web
-    allow_ip: "192.168.1.10,192.168.1.11"
+    allow_ip: "192.168.20.10,192.168.20.11"
     permission: "rw,rw"
     squash: "no_root_squash,no_root_squash"
     anon_uid: "65534,65534"
@@ -92,7 +193,7 @@ qnap_nfs_new_exports:
   # pattern as pihole/calibre-web (log-archiver has no nodeSelector, so
   # it could land on either node).
   - path: /share/CACHEDEV1_DATA/syslog-archive
-    allow_ip: "192.168.1.10,192.168.1.11"
+    allow_ip: "192.168.20.10,192.168.20.11"
     permission: "rw,rw"
     squash: "no_root_squash,no_root_squash"
     anon_uid: "65534,65534"

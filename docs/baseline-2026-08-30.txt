@@ -1,0 +1,50 @@
+# Cluster baseline captured 2026-08-30, after VLAN20 migration + step-0 recovery
+# Reference point for verifying the etcd/Longhorn/VIP work that follows.
+
+## nodes
+NAME        STATUS   ROLES                  AGE    VERSION        INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                       KERNEL-VERSION         CONTAINER-RUNTIME
+k8smaster   Ready    control-plane,master   305d   v1.33.5+k3s1   192.168.20.10   <none>        Debian GNU/Linux 13 (trixie)   6.12.47+rpt-rpi-2712   containerd://2.1.4-k3s1
+pinode-01   Ready    <none>                 11h    v1.33.5+k3s1   192.168.20.11   <none>        Debian GNU/Linux 13 (trixie)   6.12.47+rpt-rpi-2712   containerd://2.1.4-k3s1
+
+## unhealthy pods (expect none)
+NAMESPACE          NAME                                               READY   STATUS      RESTARTS          AGE
+
+## pv summary by server
+  k8smaster-nfs: 23
+  qnap: 5
+
+## released (pre-existing cruft, expect 15)
+15
+
+## argocd apps not Synced/Healthy
+  calibre-web OutOfSync Healthy
+  cert-manager OutOfSync Healthy
+  cert-manager-config OutOfSync Healthy
+  day0-bootstrap OutOfSync Healthy
+  day1-foundation OutOfSync Progressing
+  day2-services OutOfSync Healthy
+  grafana OutOfSync Healthy
+  homeassistant OutOfSync Healthy
+  immich OutOfSync Healthy
+  influxdb OutOfSync Healthy
+  novnc OutOfSync Healthy
+  obsidian OutOfSync Healthy
+  paperless OutOfSync Missing
+  qnap-storage OutOfSync Progressing
+  syslog-server OutOfSync Healthy
+  vscode-server OutOfSync Healthy
+
+## qnap mounts
+  /mnt/nfs: 9 entries
+  /mnt/photos: 14 entries
+  /mnt/books: 4368 entries
+  /mnt/media: 5 entries
+  /mnt/backup: 8 entries
+  /mnt/immich: 6 entries
+  /mnt/inbox: 6 entries
+  /mnt/vault: 1 entries
+  /mnt/paperless: 2 entries
+  /mnt/pihole: 2 entries
+  /mnt/calibre-web: 2 entries
+  /mnt/downloads: 2 entries
+  /mnt/cold: 0 entries
