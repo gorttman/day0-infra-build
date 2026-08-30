@@ -66,7 +66,12 @@ resource "unifi_device" "switch_picluster" {
     number                = 3
     name                  = "Port 3"
     forward                = "customize"
-    native_networkconf_id = unifi_network.cluster_backend.id
+    # QNAP (valinor-m). Moved from Cluster-Backend (VLAN10) to Trusted
+    # (VLAN20) 2026-08-30 - step 3 of 3 (pinode-01 -> k8smaster -> QNAP),
+    # see day0-infra-build's effervescent-squishing-token plan / memory
+    # project_vlan20_backend_migration. valinor-m identity retired -
+    # QNAP goes to a single interface (192.168.20.30) long-term.
+    native_networkconf_id = unifi_network.trusted.id
     tagged_vlan_mgmt      = "auto"
     poe_mode               = "off"
     setting_preference     = "manual"
@@ -76,7 +81,12 @@ resource "unifi_device" "switch_picluster" {
     number                = 7
     name                  = "Port 7"
     forward                = "customize"
-    native_networkconf_id = unifi_network.cluster_backend.id
+    # pinode-01. Moved from Cluster-Backend (VLAN10) to Trusted (VLAN20)
+    # 2026-08-30 - see day0-infra-build's effervescent-squishing-token
+    # plan / memory project_vlan20_backend_migration. Step 1 of 3
+    # (pinode-01 -> k8smaster -> QNAP), tested via WLAN control path,
+    # zero risk to it since WLAN never traverses Switch-PiCluster.
+    native_networkconf_id = unifi_network.trusted.id
     tagged_vlan_mgmt      = "auto"
     poe_mode               = "auto"
     setting_preference     = "manual"
@@ -86,7 +96,11 @@ resource "unifi_device" "switch_picluster" {
     number                = 8
     name                  = "Port 8"
     forward                = "customize"
-    native_networkconf_id = unifi_network.cluster_backend.id
+    # k8smaster. Moved from Cluster-Backend (VLAN10) to Trusted (VLAN20)
+    # 2026-08-30 - step 2 of 3 (pinode-01 -> k8smaster -> QNAP), see
+    # day0-infra-build's effervescent-squishing-token plan / memory
+    # project_vlan20_backend_migration.
+    native_networkconf_id = unifi_network.trusted.id
     tagged_vlan_mgmt      = "auto"
     poe_mode               = "auto"
     setting_preference     = "manual"
