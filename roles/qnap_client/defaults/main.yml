@@ -1,14 +1,26 @@
 ---
-# QNAP NAS (valinor-m) client configuration for cluster nodes.
+# QNAP NAS client configuration for cluster nodes.
 #
-# The FQDN is pinned in /etc/hosts on the wired face because:
+# 2026-08-30: QNAP consolidated to a single interface (Trusted/VLAN20,
+# 192.168.20.30) as part of the VLAN20 backend migration (see
+# day0-infra-build's effervescent-squishing-token plan / memory
+# project_vlan20_backend_migration) - the "wired face vs WLAN face"
+# split described below no longer reflects two different real
+# addresses (both now resolve the same IP), but the /etc/hosts pinning
+# itself stays authoritative and load-bearing, unrelated to that split:
 # - cluster nodes deliberately do NOT use Pi-hole for their own
 #   resolution (DNS chicken-and-egg - see day1 pihole notes), and
 # - kubelet performs NFS PersistentVolume mounts with the NODE's
 #   resolver, so every node that may run a QNAP-mounting pod must
 #   resolve this name;
-# - Pi-hole serves qnap.i3sec.com.au -> 192.168.2.30 (WLAN face) to
-#   normal clients; nodes use the wired face. Split view is intended.
+# - WLAN itself is on a deprecation path - Pi-hole's own record now
+#   just mirrors this for non-cluster/general clients, it is not the
+#   source of truth for either name.
+#
+# Known gap: this role has only ever been run against k8smaster
+# (variables/cli/hosts.ini) - pinode-01 is missing this pinning
+# entirely as of 2026-08-30, applied live as a one-off fix, not yet
+# via this role. Needs pinode-01 added as a real target.
 #
 # qnap_short added 2026-08-07: a bare hosts-file name, deliberately not
 # DNS-resolvable at all, so any consumer using it can never silently
@@ -29,7 +41,7 @@
 # starts preferring IPv6.
 qnap_fqdn: qnap.i3sec.com.au
 qnap_short: qnap
-qnap_wired_ip: 192.168.1.30
+qnap_wired_ip: 192.168.20.30
 
 # Shared NFS root image used by all diskless pinodes - pinning the name
 # here covers every netboot node at once.
