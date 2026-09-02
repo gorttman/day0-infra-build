@@ -65,15 +65,25 @@ resource "unifi_network" "default" {
   # iPad/TV - not device state, not caching, a bad fallback resolver.
   # Single DNS server: if Pi-hole is ever actually down, resolution
   # should fail loudly, not silently return a wrong answer.
-  # Two Pi-holes since 2026-09-03 (day2-services/apps/pihole), on every
-  # network. Still no router or public fallback, deliberately: a fallback
-  # resolver has no split-horizon knowledge and hands back the public
-  # record for *.i3sec.com.au, sending LAN clients out through
-  # Cloudflare's edge instead of straight to the service. A second Pi-hole
-  # is the right answer to "what if the resolver is down", and the two are
-  # anchored to different nodes with their VIPs so they cannot fail
-  # together.
-  dhcp_dns = ["192.168.2.245", "192.168.2.246"]
+  # Two Pi-holes since 2026-09-03 (day2-services/apps/pihole), anchored to
+  # different nodes with their VIPs so they cannot fail together, plus
+  # 1.1.1.2 as a third and final entry.
+  #
+  # That third entry deliberately reverses the 2026-08-25 decision above, and
+  # it is worth being honest that the reasoning there still holds: a public
+  # resolver has no knowledge of *.i3sec.com.au, and a client that falls back
+  # to it gets a working-looking public answer rather than an error. Resolvers
+  # do not reliably try the list in order - several race or round-robin - so
+  # this is not purely a last-resort path. What changed is the other side of
+  # the trade: with one Pi-hole, the fallback fired on every routine restart,
+  # which is exactly how the iPad/TV "works, then doesn't" symptom happened.
+  # With two on separate nodes it should only fire if both are gone, and in
+  # that case the choice is a wrong answer for internal names or no internet
+  # at all. Accepted knowingly, not inherited.
+  #
+  # 1.1.1.2 (not 1.1.1.1) is Cloudflare's malware-blocking resolver, matching
+  # what Pi-hole itself forwards to.
+  dhcp_dns = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false # live: dhcpguard_enabled
@@ -151,7 +161,7 @@ resource "unifi_network" "trusted" {
   dhcp_enabled = true
   dhcp_start   = "192.168.20.6"
   dhcp_stop    = "192.168.20.239"
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246"] # Pi-hole only, no fallback - same discipline as Default
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"] # Pi-hole only, no fallback - same discipline as Default
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -183,7 +193,7 @@ resource "unifi_network" "guest" {
   dhcp_enabled = true
   dhcp_start   = "192.168.30.6"
   dhcp_stop    = "192.168.30.239"
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246"]
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -213,7 +223,7 @@ resource "unifi_network" "iot" {
   dhcp_enabled = true
   dhcp_start   = "192.168.40.6"
   dhcp_stop    = "192.168.40.239"
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246"]
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false

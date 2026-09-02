@@ -41,14 +41,19 @@ config_repos:
 backend_vlan_ip: "192.168.1.10"
 backend_vlan_prefix: "27"
 
-# Pi-hole (split-horizon DNS for *.i3sec.com.au) first, then the
-# router and public DNS as fallback - not a replacement, so this host
-# still resolves normally if Pi-hole itself is ever down. Max 3
-# entries: community.general.nmcli's dns4 parameter caps there.
+# Both Pi-holes (split-horizon DNS for *.i3sec.com.au) first, then
+# 1.1.1.2 as the last resort - not a replacement, so a node still
+# resolves if both Pi-holes are down. That last entry is load-bearing:
+# 2026-09-03 proved a node whose only nameserver is Pi-hole's own VIP cannot
+# pull the Pi-hole image, so it cannot start the very thing it depends
+# on. Exactly 3 entries, and that is the ceiling twice over - glibc reads
+# at most 3 from resolv.conf, and community.general.nmcli's dns4
+# parameter caps there too. The UDM (192.168.2.1) is the entry that had
+# to give way.
 wifi_mgmt_dns:
   - "192.168.2.245"
-  - "192.168.2.1"
-  - "1.1.1.1"
+  - "192.168.2.246"
+  - "1.1.1.2"
 
 helper_scripts:
   - seal_secret.sh
