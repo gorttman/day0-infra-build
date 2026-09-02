@@ -65,7 +65,15 @@ resource "unifi_network" "default" {
   # iPad/TV - not device state, not caching, a bad fallback resolver.
   # Single DNS server: if Pi-hole is ever actually down, resolution
   # should fail loudly, not silently return a wrong answer.
-  dhcp_dns = ["192.168.2.245"]
+  # Two Pi-holes since 2026-09-03 (day2-services/apps/pihole), on every
+  # network. Still no router or public fallback, deliberately: a fallback
+  # resolver has no split-horizon knowledge and hands back the public
+  # record for *.i3sec.com.au, sending LAN clients out through
+  # Cloudflare's edge instead of straight to the service. A second Pi-hole
+  # is the right answer to "what if the resolver is down", and the two are
+  # anchored to different nodes with their VIPs so they cannot fail
+  # together.
+  dhcp_dns = ["192.168.2.245", "192.168.2.246"]
 
   igmp_snooping         = false
   dhcp_guarding         = false # live: dhcpguard_enabled
@@ -104,6 +112,123 @@ resource "unifi_network" "cluster_backend" {
 
   ipv6_ra_enable         = true
   ipv6_ra_valid_lifetime = 0
+}
+
+# --- New networks, 2026-08-28 audit/redesign session ---
+# Net-new VLANs, not yet bound to any SSID or populated with real
+# client reservations - pure shell resources so the network/DHCP/
+# firewall structure exists and can be verified via dry-run before any
+# real device ever lands on them. VLAN IDs 20/30/40 chosen to avoid the
+# existing 1 (Default, untagged) and 10 (Cluster-Backend).
+#
+# Trusted's own SSID + real device migration is deliberate follow-on
+# work (real disruption: new SSID, every device needs the credentials
+# re-entered once) - NOT part of this shell. IoT stays served by the
+# existing ARDA_HOME SSID (still bound to Default) until Trusted is
+# confirmed fully migrated off it - only then does ARDA_HOME get
+# rebound to this network, with no rejoin required since its name/
+# passphrase don't change.
+
+resource "unifi_network" "trusted" {
+  name    = "Trusted"
+  purpose = "corporate"
+  subnet  = "192.168.20.1/24"
+  vlan_id = 20
+
+  domain_name             = "i3sec.com.au"
+  internet_access_enabled = true
+  # multicast_dns = true was requested on both create AND a follow-up
+  # update (2026-08-29) - both reported success with no error, but the
+  # live API (rest/networkconf's mdns_enabled) came back false both
+  # times, confirmed via direct GET, not just a stale terraform read.
+  # Genuine provider/API quirk, not a timing fluke - capturing live
+  # reality here so the plan stays honest rather than fighting a value
+  # that won't stick. Revisit as a standalone follow-up (mDNS discovery
+  # is a convenience setting, not safety-critical - not worth blocking
+  # the network rollout over).
+  multicast_dns = false
+
+  dhcp_enabled = true
+  dhcp_start   = "192.168.20.6"
+  dhcp_stop    = "192.168.20.239"
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246"] # Pi-hole only, no fallback - same discipline as Default
+
+  igmp_snooping         = false
+  dhcp_guarding         = false
+  dhcpd_gateway_enabled = false
+  dhcp_relay_enabled    = false
+  upnp_lan_enabled      = false
+}
+
+resource "unifi_network" "guest" {
+  name    = "Guest"
+  purpose = "guest"
+  subnet  = "192.168.30.1/24"
+  vlan_id = 30
+
+  domain_name             = "i3sec.com.au"
+  internet_access_enabled = true
+  multicast_dns           = false
+
+  # network_isolation_enabled deliberately NOT set here - a real apply
+  # 2026-08-29 failed with a live API error the provider docs never
+  # mentioned: api.err.NetworkIsolationAppliedOnNonCorporateNetwork.
+  # purpose = "guest" already carries its own native isolation from
+  # every other local network - the explicit flag is only valid on
+  # purpose = "corporate" networks (e.g. a locked-down internal VLAN
+  # that still wants isolation without the guest-specific portal
+  # behavior). Docs-vs-reality mismatch, same class of gotcha as every
+  # other "verify via the live system" lesson in this project.
+
+  dhcp_enabled = true
+  dhcp_start   = "192.168.30.6"
+  dhcp_stop    = "192.168.30.239"
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246"]
+
+  igmp_snooping         = false
+  dhcp_guarding         = false
+  dhcpd_gateway_enabled = false
+  dhcp_relay_enabled    = false
+  upnp_lan_enabled      = false
+}
+
+resource "unifi_network" "iot" {
+  name    = "IoT"
+  purpose = "corporate"
+  subnet  = "192.168.40.1/24"
+  vlan_id = 40
+
+  domain_name             = "i3sec.com.au"
+  internet_access_enabled = true # per-device/per-band WAN egress is a firewall.tf concern, not a network-level toggle
+  # multicast_dns = true was requested (most IoT integrations rely on
+  # local mDNS/SSDP discovery) but hit the same live-API quirk as
+  # Trusted below - both create and a follow-up update reported
+  # success with no error, yet mdns_enabled read back false both
+  # times, confirmed via direct GET. Genuine provider/API behavior,
+  # not a fluke. Capturing live reality so the plan stays honest;
+  # revisit as a standalone follow-up before any real IoT device
+  # actually needs local discovery to work.
+  multicast_dns = false
+
+  dhcp_enabled = true
+  dhcp_start   = "192.168.40.6"
+  dhcp_stop    = "192.168.40.239"
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246"]
+
+  igmp_snooping         = false
+  dhcp_guarding         = false
+  dhcpd_gateway_enabled = false
+  dhcp_relay_enabled    = false
+  upnp_lan_enabled      = false
+
+  # NOT set here, deliberately: network_isolation_enabled. IoT needs
+  # selective reachability (Trusted -> specific reserved IoT devices,
+  # e.g. HA/spa-controller; IoT -> specific infra endpoints for HA/
+  # Mosquitto) - a blanket isolation flag would block the exceptions
+  # this design explicitly needs. Handled entirely in firewall.tf
+  # instead - see the rules there for the absolute IoT<->Trusted
+  # boundary, and their comments for what's still pending real device
+  # data (the internet-egress address-banding, per-device allow-list).
 }
 
 # Declarative import - same pattern as cloudflare-tf/warp.tf's device
