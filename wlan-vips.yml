@@ -1,0 +1,115 @@
+# Bind the WLAN-pool VIPs as /32 secondary addresses on each node's wlan0, and
+# keep proxy_arp on, so they survive a reboot.
+#
+# Why this is needed at all: MetalLB's own L2 ARP announcements do not work on
+# the ARDA_HOME WLAN. The UniFi AP proxy-answers ARP from its own client table
+# and never forwards the request to WiFi clients (confirmed 2026-07-04 via
+# tcpdump on both nodes; see day1-foundation/apps/metallb/README.md). A VIP
+# bound as a real local /32 is different - the node answers it with an ordinary
+# ARP reply, which the AP does forward - and proxy_arp is what lets it answer
+# on behalf of an address it does not own a route for. Both were applied by
+# hand once in 2026-07, documented only in a README, and silently disappeared
+# some time before 2026-08-09, taking split-horizon DNS for every WiFi client
+# in the house with them and leaving nothing to notice or reapply it.
+#
+# Renamed from pinode-wlan-vips.yml on 2026-09-03. It was pinode-01-only and
+# had drifted badly: the inventory still pointed at 192.168.1.11 (the
+# pre-VLAN20 backend address), it assumed the wireless connection was called
+# "preconfigured" when pinode-01's is "ARDA_HOME" and k8smaster's is
+# "ARDA_HOME-5G", and every VIP it listed had since moved to k8smaster. It
+# could not have run.
+#
+# Which VIP belongs to which node is not arbitrary. A WLAN VIP is only
+# reachable via the node holding its /32, so a Service is only as available as
+# the node holding BOTH its pod and its /32. The two Pi-holes are anchored one
+# per lane (see day2-services/apps/pihole) precisely so this pairing holds:
+# .245 with pihole-a on k8smaster, .246 with pihole-b on pinode-01. Losing a
+# node then costs exactly one resolver instead of both. Keep this map and those
+# nodeAffinity rules in step.
+#
+# Run with:
+#   ansible-playbook wlan-vips.yml -i wlan-vips-inventory.ini
+- name: Ensure WLAN-pool VIPs are bound and proxy_arp is on
+  hosts: wlan_vip_nodes
+  gather_facts: false
+  # Deliberately NOT become: true - Ansible's become mechanism hit a
+  # pseudo-TTY/ControlPersist interaction bug on pinode-01 (worker died
+  # mid-escalation, confirmed live 2026-08-09 with -vvv, while plain
+  # passwordless `sudo -n true` over the same SSH session worked instantly).
+  # Every privileged command below invokes sudo directly instead.
+  vars:
+    # Only VIPs actually claimed by a LoadBalancer Service today. traefik
+    # (.241) is here as the temporary safety net kept alive while its real VIP
+    # moves to vlan20-pool; drop it once the DNS records are repointed.
+    # ingress-nginx's old .242 is deliberately absent - it moved to
+    # 192.168.20.238 and nothing claims .242 any more.
+    wlan_vip_map:
+      k8smaster:
+        conn: ARDA_HOME-5G
+        vips:
+          - "192.168.2.240/32"   # pihole-web
+          - "192.168.2.241/32"   # traefik, legacy - temporary
+          - "192.168.2.245/32"   # pihole-dns   (pihole-a runs here)
+      pinode-01:
+        conn: ARDA_HOME
+        vips:
+          - "192.168.2.246/32"   # pihole-dns-b (pihole-b runs here)
+  tasks:
+    - name: Resolve this node's connection name and VIP list
+      ansible.builtin.set_fact:
+        wlan_conn: "{{ wlan_vip_map[inventory_hostname].conn }}"
+        wlan_vips: "{{ wlan_vip_map[inventory_hostname].vips }}"
+
+    - name: Read the addresses currently on the connection
+      ansible.builtin.command:
+        cmd: "sudo nmcli --get-values ipv4.addresses connection show {{ wlan_conn }}"
+      register: current_addresses
+      changed_when: false
+
+    - name: Identify which VIPs are missing
+      ansible.builtin.set_fact:
+        missing_vips: "{{ wlan_vips | reject('in', current_addresses.stdout) | list }}"
+
+    # Deliberately a raw nmcli command, not community.general.nmcli's `ip4`
+    # parameter - that parameter SETS ipv4.addresses outright, it does not
+    # append, so looping it per-VIP would leave only the last address bound.
+    # `+ipv4.addresses` (this exact form, proven live 2026-08-09) is the
+    # additive syntax.
+    - name: Add any missing VIPs as secondary addresses
+      when: missing_vips | length > 0
+      ansible.builtin.command:
+        cmd: >-
+          sudo nmcli connection modify {{ wlan_conn }}
+          {{ missing_vips | map('regex_replace', '^(.*)$', '+ipv4.addresses \1') | join(' ') }}
+      notify: Reactivate the wireless connection
+
+    - name: Check current proxy_arp state on wlan0
+      ansible.builtin.command:
+        cmd: cat /proc/sys/net/ipv4/conf/wlan0/proxy_arp
+      register: proxy_arp_current
+      changed_when: false
+
+    - name: Enable proxy_arp on wlan0 now (live, immediate effect)
+      when: proxy_arp_current.stdout | trim != "1"
+      ansible.builtin.command:
+        cmd: sudo sysctl -w net.ipv4.conf.wlan0.proxy_arp=1
+
+    - name: Read the sysctl.d persistence file for proxy_arp (if any)
+      ansible.builtin.command:
+        cmd: cat /etc/sysctl.d/99-wlan0-proxy-arp.conf
+      register: proxy_arp_file_current
+      changed_when: false
+      failed_when: false
+
+    # sudo tee, not a `>` redirect - redirection needs a shell, and this file's
+    # established idiom is to avoid one.
+    - name: Persist proxy_arp=1 for wlan0 across reboots
+      when: "'net.ipv4.conf.wlan0.proxy_arp = 1' not in proxy_arp_file_current.stdout"
+      ansible.builtin.command:
+        cmd: sudo tee /etc/sysctl.d/99-wlan0-proxy-arp.conf
+        stdin: "net.ipv4.conf.wlan0.proxy_arp = 1\n"
+
+  handlers:
+    - name: Reactivate the wireless connection
+      ansible.builtin.command:
+        cmd: "sudo nmcli connection up {{ wlan_conn }}"
