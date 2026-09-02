@@ -93,12 +93,29 @@
 
 # === Backend VLAN static IP (end0) ===
 
+# The same DNS list as the wireless connection, and for a sharper reason
+# here. On 2026-09-03 Pi-hole was unpinned from k8smaster so it could float,
+# scheduled onto pinode-01, and deadlocked: the node's only nameserver was
+# Pi-hole's own service VIP, so the kubelet could not resolve
+# registry-1.docker.io to pull the Pi-hole image, so Pi-hole could not start,
+# so the node still had no DNS. All house DNS was down until Pi-hole was
+# pinned back. A node that may have to start Pi-hole cannot depend on
+# Pi-hole to do it. Pi-hole stays first, so split-horizon still wins
+# whenever it is up.
+#
+# Live note: pinode-01's wired connection is NetworkManager's default
+# "Wired connection 1", not backend-vlan - this role has never run there, and
+# backend_vlan_ip below is still the pre-VLAN20 192.168.1.10. The fallbacks
+# were applied to that connection by hand on 2026-09-03. Reconciling this
+# role with VLAN20 is its own job.
 - name: Configure static IP on end0 for backend VLAN
   community.general.nmcli:
     conn_name: backend-vlan
     ifname: end0
     type: ethernet
     ip4: "{{ backend_vlan_ip }}/{{ backend_vlan_prefix }}"
+    dns4: "{{ wifi_mgmt_dns }}"
+    dns4_ignore_auto: true
     never_default4: true
     autoconnect: true
     state: present
