@@ -38,17 +38,18 @@
   # passwordless `sudo -n true` over the same SSH session worked instantly).
   # Every privileged command below invokes sudo directly instead.
   vars:
-    # Only VIPs actually claimed by a LoadBalancer Service today. traefik
-    # (.241) is here as the temporary safety net kept alive while its real VIP
-    # moves to vlan20-pool; drop it once the DNS records are repointed.
-    # ingress-nginx's old .242 is deliberately absent - it moved to
-    # 192.168.20.238 and nothing claims .242 any more.
+    # Only VIPs actually claimed by a LoadBalancer Service today, which after
+    # the 2026-09-03 cutover means Pi-hole and nothing else. traefik (.241)
+    # and ingress-nginx (.242) both moved to vlan20-pool, where MetalLB's
+    # announcement is real and either node can hold the address; these two
+    # remain here only because a resolver has to be reachable before anything
+    # else can be, so they are the last thing that should ride on an
+    # inter-VLAN path.
     wlan_vip_map:
       k8smaster:
         conn: ARDA_HOME-5G
         vips:
           - "192.168.2.240/32"   # pihole-web
-          - "192.168.2.241/32"   # traefik, legacy - temporary
           - "192.168.2.245/32"   # pihole-dns   (pihole-a runs here)
       pinode-01:
         conn: ARDA_HOME
