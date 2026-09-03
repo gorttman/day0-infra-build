@@ -1,0 +1,110 @@
+# One-off diagnostic k8s Job template, not GitOps-managed (no ArgoCD Application
+# for this - apply directly with kubectl when needed, delete when done reading
+# the report). Read-only by design: mounts its target NFS path with
+# readOnly: true and never passes czkawka_cli's -D (delete-method) flag, so it
+# can only ever produce a report, never touch a file.
+#
+# Built 2026-08-17 for the Public/Photo bulk photo backlog dedupe pass (see
+# memory: project_photo_bulk_backlog_execution). To reuse for a different
+# source folder: change the nfs volume's `path`/subPath and the -d target
+# inside the container to point elsewhere.
+#
+# Real gotchas that cost real time getting this right - don't repeat them:
+#   - `-x` extensions must be one comma-separated string (jpg,png,...), not
+#     space-separated - space-separated silently parses as extra positional
+#     args and errors immediately.
+#   - `-d` (directories) is the opposite: repeat the flag per directory
+#     (-d /path1 -d /path2), NOT space-separated after one -d - that also
+#     errors as an unexpected extra argument, same failure shape as -x but
+#     the opposite fix.
+#   - czkawka_cli exits non-zero BY DESIGN whenever it finds any duplicates
+#     (there's a dedicated -W/--ignore-error-code-on-found flag specifically
+#     to suppress this for scripting). Without -W, a `set -e` script treats
+#     a genuinely successful scan-that-found-real-duplicates as a failure
+#     and aborts before reaching any cleanup/sleep step - the job shows
+#     Failed/BackoffLimitExceeded even though it worked and the results are
+#     sitting right there in the logs. Always pass -W in a scripted context.
+#   - The bare IMAGE extension macro does NOT include RAW or HEIC formats -
+#     list them explicitly for a real phone+camera photo collection.
+#   - Check `kubectl describe node <target> | grep -A5 "Allocated resources"`
+#     before submitting - this cluster's k8smaster is often near its CPU
+#     *request* ceiling, and an ordinary cpu: "1" request can fail to
+#     schedule even though the node has plenty of spare capacity by limits.
+#   - `kubectl logs -f` against this cluster disconnects quickly and
+#     repeatedly even on a perfectly healthy pod - don't treat "log stream
+#     ended" as a failure signal. Poll `kubectl get pod ... phase` plus a
+#     non-follow `kubectl logs --tail=5` snapshot instead of following.
+#   - czkawka_cli prints nothing incremental - it's silent until the very
+#     end. To confirm it's alive mid-scan (not stuck) rather than just
+#     slow, check the process's actual state and open files directly via
+#     /proc/<pid>/status and /proc/<pid>/fd inside the pod - state "S"
+#     (sleeping) is normal/expected, it means blocked on network I/O against
+#     the QNAP, not stuck.
+#   - Confirm the cluster node architecture (`kubectl get nodes -o
+#     custom-columns=...ARCH`) before picking a czkawka_cli release asset -
+#     this cluster's nodes are arm64, not x86_64, even though the QNAP
+#     itself is x86_64.
+#   - The first real run of this against the full 1TB Public/Photo tree was
+#     killed by activeDeadlineSeconds set to 6h (21600) - it was still
+#     legitimately working (I/O-bound over old QNAP NFS, not stuck) when
+#     Kubernetes terminated it for exceeding the deadline. Bumped to 48h
+#     (172800). If reusing this against another large NFS-mounted source,
+#     don't assume 6h is enough - check on it rather than trust a short
+#     deadline.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: czkawka-photo-scan
+  namespace: default
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 172800
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: k8smaster
+      containers:
+        - name: czkawka
+          image: debian:trixie-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              apt-get update -qq
+              apt-get install -y -qq curl ca-certificates libheif1 >/dev/null
+              curl -sL -o /usr/local/bin/czkawka_cli https://github.com/qarmin/czkawka/releases/download/12.0.1/linux_czkawka_cli_heif_raw_avif_arm64
+              chmod +x /usr/local/bin/czkawka_cli
+              echo "=== starting scan: $(date) ==="
+              czkawka_cli image \
+                -d /mnt/photo \
+                -x jpg,jpeg,png,heic,heif,cr2,cr3,nef,arw,dng,tiff,tif,bmp,gif \
+                -f /report/similar-images-report.txt \
+                -p /report/similar-images-report.json \
+                -W
+              echo "=== scan finished: $(date) ==="
+              wc -l /report/similar-images-report.txt || true
+              sleep 3600
+          volumeMounts:
+            - name: photo
+              mountPath: /mnt/photo
+              subPath: Photo
+              readOnly: true
+            - name: report
+              mountPath: /report
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: "300m"
+            limits:
+              memory: 4Gi
+              cpu: "2"
+      volumes:
+        - name: photo
+          nfs:
+            server: qnap
+            path: /Public
+            readOnly: true
+        - name: report
+          emptyDir:
+            sizeLimit: 1Gi

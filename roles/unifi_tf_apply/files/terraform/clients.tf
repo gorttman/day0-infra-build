@@ -342,12 +342,12 @@ resource "unifi_user" "lwip0" {
   blocked    = false
 }
 
-resource "unifi_user" "desktop_aee4eif" {
-  mac        = "dc:21:5c:97:2a:6b"
-  name       = "DESKTOP-AEE4EIF"
-  network_id = unifi_network.default.id
-  blocked    = false
-}
+# REMOVED 2026-09-03 on the user's call ("Desktop can go"). This was one
+# of the five phantom records an earlier apply CREATED rather than adopted
+# (no first_seen/last_seen, _id 6a8d68457eae7c6ea8de92e6, stamped
+# 2026-08-25 20:02:45). Real Intel hardware MAC, but the machine is gone -
+# deleting the resource lets Terraform forget the record on the console
+# too (skip_forget_on_destroy is false by default), which is the intent.
 
 # The genuine "few" exceptions, confirmed by data, not assumption: no
 # `name`, no `hostname` at all. `name` is required, not inventing one.

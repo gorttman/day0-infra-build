@@ -1,3 +1,23 @@
+# =============================================================================
+# DEPRECATED 2026-09-03 - DO NOT RUN. The WLAN is gone from both nodes.
+# =============================================================================
+# Pi-hole's VIPs moved to the Trusted VLAN (192.168.20.245/.246/.240) and
+# wlan0 was taken down on k8smaster and pinode-01, with autoconnect disabled
+# on every wireless profile. There are no WLAN-pool VIPs left to bind, and
+# metallb-config.yml no longer defines wlan-pool at all.
+#
+# Running this now would re-add /32 addresses for VIPs that have moved, so a
+# node would answer ARP for addresses nothing serves - turning a clean failure
+# into a DNS blackhole. That exact fault was cleaned up by hand on 2026-09-03
+# (stale .240/.241/.242/.245 on k8smaster, .246 on pinode-01).
+#
+# Kept as the record of why the WLAN VIPs needed hand-binding at all: MetalLB
+# L2 does not work over this AP. If a WLAN VIP is ever needed again, that
+# constraint still applies - but prefer not to; the WLAN path is 24 Mbit/s
+# half-duplex and routing LAN traffic over it is what caused the 2026-09-03
+# Jellyfin stalls.
+# =============================================================================
+
 # Bind the WLAN-pool VIPs as /32 secondary addresses on each node's wlan0, and
 # keep proxy_arp on, so they survive a reboot.
 #

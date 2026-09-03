@@ -95,7 +95,14 @@ resource "unifi_network" "default" {
   #
   # 1.1.1.2 (not 1.1.1.1) is Cloudflare's malware-blocking resolver, matching
   # what Pi-hole itself forwards to.
-  dhcp_dns = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
+  #
+  # 2026-09-03: moved from 192.168.2.245/.246 to 192.168.20.245/.246. The
+  # resolvers left the WLAN for Trusted - same last octets, new subnet. The
+  # WLAN VIPs they replaced were never real MetalLB announcements (the AP
+  # drops gratuitous ARP for claimed IPs); they were a /32 hand-bound on a
+  # node's wlan0, which did not survive a reboot. Cross-VLAN reachability was
+  # proven before this changed, not assumed.
+  dhcp_dns = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false # live: dhcpguard_enabled
@@ -172,10 +179,17 @@ resource "unifi_network" "trusted" {
 
   dhcp_enabled = true
   dhcp_start   = "192.168.20.6"
-  dhcp_stop    = "192.168.20.239"
+  # Stops at .229, not .239, since 2026-09-03: .230-.250 on this subnet is
+  # MetalLB's vlan20-pool (day1-foundation apps/metallb/metallb-config.yml),
+  # which now carries the Pi-hole resolver VIPs as well as traefik and
+  # ingress-nginx. Leaving the scope overlapping the pool would let DHCP hand
+  # a lease to an address MetalLB also claims - the two have no knowledge of
+  # each other, and the resulting duplicate-IP fault would land on DNS, which
+  # is the worst possible place for it.
+  dhcp_stop    = "192.168.20.229"
   # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
   # see the full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
+  dhcp_dns     = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -209,7 +223,7 @@ resource "unifi_network" "guest" {
   dhcp_stop    = "192.168.30.239"
   # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
   # see the full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
+  dhcp_dns     = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -241,7 +255,7 @@ resource "unifi_network" "iot" {
   dhcp_stop    = "192.168.40.239"
   # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
   # see the full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
+  dhcp_dns     = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false

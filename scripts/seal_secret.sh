@@ -31,7 +31,13 @@ kubectl create secret generic "$APP_NAME-secret" \
 # name - confirmed 2026-07-19 this was "sealed-secret" (singular) here,
 # which doesn't match the real "sealed-secrets-controller" Service and
 # would fail to fetch the controller's cert.
-kubeseal \
+#
+# KUBECONFIG set explicitly - confirmed 2026-08-21 that kubeseal (unlike
+# `kubectl`, which is actually a symlink to the k3s binary with its own
+# built-in fallback to this exact path) has no such fallback and fails
+# with "no configuration has been provided" otherwise, even when plain
+# `sudo kubectl` works fine in the same shell.
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubeseal \
   --controller-namespace kube-system \
   --controller-name sealed-secrets-controller \
   --format yaml \

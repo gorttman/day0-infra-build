@@ -50,9 +50,13 @@ backend_vlan_prefix: "27"
 # at most 3 from resolv.conf, and community.general.nmcli's dns4
 # parameter caps there too. The UDM (192.168.2.1) is the entry that had
 # to give way.
+# 2026-09-03: moved to the Trusted (VLAN20) resolver addresses. Pi-hole left
+# the WLAN entirely - same last octets, new subnet - and wlan0 is now down on
+# both nodes, so a WLAN-subnet resolver address would be unreachable from a
+# rebuilt node. See wlan-vips.yml (deprecated) for why the WLAN VIPs existed.
 wifi_mgmt_dns:
-  - "192.168.2.245"
-  - "192.168.2.246"
+  - "192.168.20.245"
+  - "192.168.20.246"
   - "1.1.1.2"
 
 helper_scripts:
