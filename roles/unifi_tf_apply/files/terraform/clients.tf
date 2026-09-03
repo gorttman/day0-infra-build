@@ -25,6 +25,16 @@
 # lesson as network.tf/#8). Only the original 6 (HISTORY.md #13) have
 # a genuinely ACTIVE reservation.
 #
+# k8smaster-m/pinode-m - STALENESS FLAGGED, audit 2026-09-03, deliberately
+# NOT changed: both still declare network_id = cluster_backend, which is
+# exactly what the console stores, so this code is correct against live and
+# the plan is clean. But both interfaces physically moved to Trusted
+# (VLAN 20) in the 2026-08-30 backend migration - live
+# last_connection_network_name reads "Trusted" for both. So it's the
+# console's stored association that's stale against reality, not this file.
+# Changing it here would be a live WRITE, not a capture, which is out of
+# scope for an audit pass - raised for a decision instead.
+#
 # k8smaster-m/pinode-m: same reasoning as valinor-m in #13 for why
 # fixed_ip stays undeclared (their addresses come from static
 # NetworkManager config, not a UniFi reservation) - but unlike #13,
@@ -345,7 +355,99 @@ resource "unifi_user" "desktop_aee4eif" {
 #   mac 7c:d5:66:a1:3f:41 (Amazon Technologies Inc.)
 #   mac a8:1a:f1:49:1d:bb (Apple, Inc.)
 #   mac 56:ad:52:8e:80:40 (no vendor OUI match either)
-# Also out of scope per the 30-day activity rule (HISTORY.md #14):
+# Was also out of scope per the 30-day activity rule (HISTORY.md #14):
 #   mac 38:a5:c9:e9:91:58, fixed_ip 192.168.2.29 (active reservation,
 #   but last_seen outside the 30-day window - not in the current 39)
+#
+# UPDATE, audit 2026-09-03: that one is back IN scope - last_seen is now
+# 2026-08-25, inside the window. It is the ONLY live-customised client
+# still not represented in this file, and the only remaining gap between
+# the console and this code for unifi_user.
+#
+# Still blocked on one thing, and only one: `name` is a REQUIRED argument
+# on unifi_user (confirmed against the provider's own schema docs), and
+# this record has no `name` set live. Its `hostname` is "wlan0", which is
+# both useless as an identifier and shared with another device
+# (c4:82:e1:1c:e3:9b), so the "hostname is effective state, not invented
+# content" precedent used above does NOT hold here - writing "wlan0" would
+# push a new, misleading name onto the console rather than capture one.
+#
+# What IS known about it, from the complete live record: 2.4GHz-only,
+# associates via In-Wall-Office, on ARDA_HOME, active reservation
+# 192.168.2.29, first seen 2025-09-28, no OUI/vendor fingerprint at all
+# (so no automatic identification available either).
+#
+# Needs a real name from the user before it can be declared. Deliberately
+# NOT left as a silent gap - see feedback_no_deferred_manual_steps.
 
+
+################################################################################
+# Audit pass 2026-09-03 - six clients that were live-customised but had no
+# resource here. Found by diffing the complete live rest/user record set
+# against this file; all six are within the 30-day activity rule.
+#
+# Captured EXACTLY as live, nothing invented - the UDM is the authoritative
+# source for this pass, so every field below already has that value on the
+# console and applying these should be a pure no-op adoption.
+#
+# network_id deliberately OMITTED on all six (unlike every resource above):
+# live `network_id` is genuinely unset on each of these records - only the
+# two -m interfaces have it set at all. Declaring `unifi_network.default.id`
+# here would WRITE that association onto clients that don't currently have
+# one, which is a change, not a capture. Verified per-record, not assumed.
+#
+# fixed_ip likewise omitted where live has `use_fixedip: false` - the
+# address is stored but inactive, the same "disabled != unset" trap
+# documented in network.tf and HISTORY.md #8. Applies to valinor-m
+# (192.168.1.18) and GPO Pergola Double (192.168.2.15).
+
+# Second interface on the QNAP. Distinct from `valinor` above
+# (00:08:9b:bb:ee:d9) - different MAC, different record. Now connects on
+# Trusted (VLAN 20) after the 2026-08-30 backend migration, but its stored
+# network_id is unset, so nothing to declare for that here.
+resource "unifi_user" "valinor_m" {
+  mac             = "00:08:9b:bb:ee:da"
+  name            = "valinor-m"
+  dev_id_override = 4556
+  blocked         = false
+}
+
+# Distinct from `bretts_mbp` above (fc:b2:14:af:61:5e) - a different
+# physical machine, not a duplicate. This one has a real `name` set live;
+# no dev_id_override on it.
+resource "unifi_user" "bretts_macbook_pro" {
+  mac      = "8c:85:90:49:86:ac"
+  name     = "Brett's Macbook Pro"
+  blocked  = false
+}
+
+# The four smart plugs. `gpo_plug_base_pergola_2` (40:f5:20:ee:71:74) was
+# already captured further up - these are its four siblings, all carrying
+# the same dev_id_override 4412 icon set by hand on the console.
+resource "unifi_user" "gpo_outdoor_lighting_shed_2" {
+  mac             = "84:cc:a8:8a:dd:45"
+  name            = "GPO Outdoor-Lighting Shed-2"
+  dev_id_override = 4412
+  blocked         = false
+}
+
+resource "unifi_user" "gpo_shed_outdoor_lights" {
+  mac             = "e0:98:06:16:a7:33"
+  name            = "GPO shed outdoor lights"
+  dev_id_override = 4412
+  blocked         = false
+}
+
+resource "unifi_user" "gpo_plug_base_pergola_1" {
+  mac             = "24:62:ab:3a:97:61"
+  name            = "GPO Plug-base pergola 1"
+  dev_id_override = 4412
+  blocked         = false
+}
+
+resource "unifi_user" "gpo_pergola_double" {
+  mac             = "c4:82:e1:1c:e3:9b"
+  name            = "GPO Pergola Double"
+  dev_id_override = 4412
+  blocked         = false
+}

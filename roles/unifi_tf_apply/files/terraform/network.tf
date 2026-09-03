@@ -7,6 +7,18 @@
 # "Internet 1" (purpose = wan) is intentionally NOT declared here - it's
 # the system-managed WAN network, not a candidate for unifi_network.
 #
+# THE ONE DELIBERATE CODE-AHEAD-OF-LIVE DIVERGENCE (audit 2026-09-03):
+# every other file in this directory is written to match the console
+# exactly - the UDM is the authoritative source, and code is corrected to
+# it, not the reverse. `dhcp_dns` is the single deliberate exception, on
+# the user's explicit call: the three-entry list below is CORRECT and the
+# console is what's wrong. Live is still handing out only 192.168.2.245 on
+# all four DHCP networks, so commits 41cb0c7 ("hand out both Pi-holes") and
+# f9b4f21 ("add 1.1.1.2 as the final fallback") are committed but never
+# applied. A plan will therefore show 4 networks to change until someone
+# runs the playbook with -e unifi_tf_do_apply=true. That is expected drift,
+# not a mistake to be "fixed" by editing these values back down.
+#
 # METHODOLOGY NOTE (learned the hard way via the dry-run, see HISTORY.md):
 # "no documented default -> safe to leave undeclared, Terraform adopts
 # whatever's live" is WRONG for this provider. Undeclared optional
@@ -161,7 +173,9 @@ resource "unifi_network" "trusted" {
   dhcp_enabled = true
   dhcp_start   = "192.168.20.6"
   dhcp_stop    = "192.168.20.239"
-  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"] # Pi-hole only, no fallback - same discipline as Default
+  # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
+  # see the full rationale in the Default resource above.
+  dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -193,6 +207,8 @@ resource "unifi_network" "guest" {
   dhcp_enabled = true
   dhcp_start   = "192.168.30.6"
   dhcp_stop    = "192.168.30.239"
+  # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
+  # see the full rationale in the Default resource above.
   dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
 
   igmp_snooping         = false
@@ -223,6 +239,8 @@ resource "unifi_network" "iot" {
   dhcp_enabled = true
   dhcp_start   = "192.168.40.6"
   dhcp_stop    = "192.168.40.239"
+  # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
+  # see the full rationale in the Default resource above.
   dhcp_dns     = ["192.168.2.245", "192.168.2.246", "1.1.1.2"]
 
   igmp_snooping         = false

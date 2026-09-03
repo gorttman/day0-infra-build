@@ -7,7 +7,72 @@ the Cloudflare edge. Scope is "everything that can be" managed as code:
 networks/VLANs, WLANs, per-device radio/physical settings, firewall,
 port forwards, static routes, static DHCP reservations, user groups.
 
-**Status (2026-08-05):** real resources exist on the live gateway now
+**Status (2026-09-03, current):** full drift audit run - live console
+pulled GET-only across every config endpoint, compared against every
+file here, then reconciled. **Code and console are converged: a plan
+now returns `No changes`.** What that audit changed:
+
+- Six live-customised clients had no resource here (`valinor-m`,
+  `Brett's Macbook Pro`, four GPO smart plugs) - captured and applied.
+  All six ADOPTED their existing console records (verified: original
+  `_id` and `first_seen` preserved, client count unchanged at 78), so
+  nothing new was created on the UDM.
+- `dhcp_dns` was the one place code was deliberately AHEAD of live -
+  commits 41cb0c7/f9b4f21 (both Pi-holes + 1.1.1.2 fallback) were
+  committed but never applied, so every DHCP client had a single
+  resolver and no fallback. Applied to all four DHCP networks after
+  verifying both Pi-holes actually answer (the 2026-08-23 incident was
+  exactly this failure, unverified). This is the ONE case where the
+  console was corrected to match code rather than the reverse.
+- ACL-based IoT<->Trusted isolation DROPPED (was "deferred") on the
+  user's call. The live test rule from 2026-08-29 is gone on its own -
+  see `firewall.tf`. Consequence: no IoT<->Trusted isolation exists;
+  fine while both are empty shells, must be revisited BEFORE phase 2.
+
+Governing rule established this session: **the UDM is the authoritative
+source** - code gets corrected to match the console, not the reverse.
+`dhcp_dns` is the single documented exception.
+
+Known remaining gaps, deliberately open, not silently dropped:
+- mac `38:a5:c9:e9:91:58` holds an ACTIVE reservation on 192.168.2.29
+  but has no `name` live, and `name` is required on `unifi_user`. Not
+  the spa radio (that's `10:06:1c:4d:19:24`, alive and already in
+  code). Unidentified - needs a name, or the stale reservation
+  deleted. See the note at the end of `clients.tf`.
+- Five console records were CREATED (not adopted) by an earlier apply
+  and have no device behind them - no `first_seen`/`last_seen`, all
+  with sequential `_id`s `6a8d6842`-`6a8d6845`: iPad, MacBookAir,
+  Camera - Garage, GPO Plug-base pergola 2, DESKTOP-AEE4EIF. Still
+  declared in `clients.tf`. Cleanup undecided.
+- Site settings are still almost entirely unmanaged: of 41 live
+  singletons only `ips` is in code. 18 have a provider resource (of
+  which `locale`, `country`, `teleport`, `ether_lighting`, `mgmt`,
+  `usg` are genuinely hand-set); 23 have none. The only hand-set one
+  with no provider resource is `mdns` - and it is the likely (NOT yet
+  proven) reason `multicast_dns` silently won't stick on Trusted/IoT:
+  mDNS is a site-level singleton whose network allowlist contains only
+  Default, which a per-network flag can't override. Agreed approach
+  for those: Ansible `uri` tasks in this role, not a Terraform
+  `null_resource` escape hatch, with the values as a dictionary in the
+  play vars file.
+
+**Status (2026-08-29, superseded):** `switch_mainnet`/`switch_picluster`/
+`gateway` (marked "still NOT applied" in the 2026-08-05 status below)
+are in fact applied and tracked in state - confirmed via a clean
+post-firmware-update plan, exact date unrecoverable (see
+`feedback_show_plan_before_apply.md` in memory - an agent applied them
+without review at some undocumented point). Three new networks added
+2026-08-29: `Trusted` (VLAN 20), `Guest` (VLAN 30), `IoT` (VLAN 40) -
+shells only, no SSID bound, no client migration yet. IoT<->Trusted
+firewall isolation is designed but **blocked** on this provider - see
+the detailed comment at the top of `firewall.tf` for the full
+investigation (legacy firewall rules gated behind a one-way
+zone-based-firewall upgrade; a working lower-risk mechanism exists
+("ACL Rules") but this provider version has no matching resource for
+it) and the three real options once this gets picked back up. The
+2026-08-05 status below is otherwise superseded, kept for history.
+
+**Status (2026-08-05, historical):** real resources exist on the live gateway now
 across every resource type in this app — all through throwaway
 `kubectl`-created Jobs against the real backend, **not** through the
 GitOps path (`unifi-tf-app.yml` is still not registered in
