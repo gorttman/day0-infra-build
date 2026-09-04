@@ -218,3 +218,29 @@ ls /srv/nfs/syslog-store/logging-syslog-storage-pvc-*/
 app-of-apps. It carries no ArgoCD tracking annotation, so it reads as
 unmanaged drift when auditing the cluster against Git. That is
 expected. Every other SealedSecret in the cluster is ArgoCD-managed.
+
+## Step 8 - Restore data
+
+Steps 1-7 rebuild infrastructure and let ArgoCD redeploy the app fleet.
+They restore no data. `/usr/local/bin/restore.sh` handles that, deployed
+by `roles/backup_restore` during Step 3.
+
+Run these in order - `ssh-keys` first, because every QNAP-targeting play
+and every other restore stream depends on reaching the NAS:
+
+    restore.sh list                 # what is restorable right now
+    restore.sh ssh-keys             # ~/.ssh, needed before any QNAP play
+    restore.sh sealed-secrets       # stage the newest key backup
+    restore.sh postgres             # all databases, newest generation
+    restore.sh adhoc                # manifests kept outside ArgoCD
+    restore.sh qnap-data <source>   # per-export file restore
+
+Every real restore asks for confirmation. To rehearse without touching
+anything live, use `--dry-run`, or restore into a scratch target with
+`postgres <db> --to <scratch-db>` / `qnap-data <source> --to <path>`.
+
+Not covered by restore.sh: etcd. Snapshots are synced to
+`/mnt/backup/k8smaster-etcd-snapshots` by a cron entry in
+`roles/qnap_client`, and are restored with `k3s server
+--cluster-reset --cluster-reset-restore-path=<snapshot>`, which is a
+cluster-level operation rather than a data restore.

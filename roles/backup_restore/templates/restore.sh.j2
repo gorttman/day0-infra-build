@@ -34,6 +34,8 @@ restore.sh - unified restore for QNAP/cluster backups.
   restore.sh qnap-data <source> [date] [--dry-run]
                                               Restore a QNAP export (default: newest generation)
   restore.sh qnap-data <source> --to <path>  Restore into a scratch path instead - safe test, no confirmation needed
+  restore.sh ssh-keys [--dry-run]            Restore SSH private keys to ~/.ssh (needed before any QNAP-targeting play)
+  restore.sh adhoc [--dry-run]               Apply manifests kept outside ArgoCD (day2-services/adhoc/)
 
 Real restores (no --dry-run, no --to) ask for confirmation before
 touching anything. Nothing here ever runs unattended or on a schedule.
@@ -399,10 +401,63 @@ cmd_qnap_data() {
 
 # --- entry point -----------------------------------------------------
 
+# --- ssh keys -------------------------------------------------------------
+# A rebuilt controller has no SSH keys, and group_vars/qnap.yml points
+# ansible_ssh_private_key_file at ~/.ssh/qnap_ansible_ed25519. Without
+# this, every QNAP-targeting play fails at connection time and the QNAP
+# half of the rebuild simply cannot run. Keys reach the QNAP through the
+# nightly credentials/ rsync in roles/qnap_client.
+cmd_ssh_keys() {
+  local dryrun="" src="{{ credentials_backup_dir }}/ssh" dest="$HOME/.ssh"
+  [ "${1:-}" = "--dry-run" ] && dryrun=1
+  if [ ! -d "$src" ]; then
+    echo "No SSH key backup at $src" >&2; return 1
+  fi
+  local n=0
+  for f in "$src"/*; do
+    [ -e "$f" ] || continue
+    local base; base="$(basename "$f")"
+    if [ -n "$dryrun" ]; then
+      echo "would restore $base -> $dest/$base"
+    else
+      mkdir -p "$dest"; chmod 700 "$dest"
+      cp -p "$f" "$dest/$base"
+      case "$base" in *.pub) chmod 644 "$dest/$base" ;; *) chmod 600 "$dest/$base" ;; esac
+    fi
+    n=$((n+1))
+  done
+  echo "${dryrun:+would restore }${n} SSH key file(s)"
+}
+
+# --- adhoc manifests ------------------------------------------------------
+# day2-services/adhoc/ holds manifests that are real and applied but
+# deliberately outside every ArgoCD sync path - currently the
+# immich-tagging SealedSecret, which is sealed for the default namespace
+# because the ad-hoc Jobs that consume it live there. Nothing syncs these,
+# so a rebuild must apply them explicitly.
+cmd_adhoc() {
+  local dryrun="" dir="$HOME/gm-dev/day2-services/adhoc"
+  [ "${1:-}" = "--dry-run" ] && dryrun=1
+  if [ ! -d "$dir" ]; then
+    echo "No adhoc directory at $dir" >&2; return 1
+  fi
+  local n=0
+  for f in "$dir"/*.yml "$dir"/*.yaml; do
+    [ -e "$f" ] || continue
+    if [ -n "$dryrun" ]; then echo "would apply $(basename "$f")"
+    else kubectl apply -f "$f" || return 1
+    fi
+    n=$((n+1))
+  done
+  echo "${dryrun:+would apply }${n} adhoc manifest(s)"
+}
+
 case "${1:-}" in
   list) cmd_list ;;
   postgres) shift; cmd_postgres "$@" ;;
   sealed-secrets) shift; cmd_sealed_secrets "$@" ;;
   qnap-data) shift; cmd_qnap_data "$@" ;;
+  ssh-keys) shift; cmd_ssh_keys "$@" ;;
+  adhoc) shift; cmd_adhoc "$@" ;;
   *) usage; exit 1 ;;
 esac
