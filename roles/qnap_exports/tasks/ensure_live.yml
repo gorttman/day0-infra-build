@@ -1,0 +1,33 @@
+################################################################################
+# FILE: roles/qnap_exports/tasks/ensure_live.yml
+################################################################################
+---
+# The other task files in this role reconcile /etc/config/nfssetting, the
+# flash-backed config QTS reloads from on boot. They cannot see whether
+# the *running* server actually serves those exports.
+#
+# Those two states genuinely diverge here. A QNAP reboot re-registers
+# external/USB-volume exports fresh and can silently drop them, leaving
+# nfssetting perfect and the export gone. Because every other task in
+# this role is check-then-fix against the file, they all report no change
+# and the restart handler never fires - so the export stays dead
+# indefinitely. /syslog-archive was in exactly this state for two months,
+# which is what kept log-archiver failing.
+#
+# exportfs -v is the running server's own view, so comparing against it
+# catches the divergence the config-file checks structurally cannot.
+- name: Read the running NFS export table
+  ansible.builtin.raw: exportfs -v
+  register: qnap_live_exports
+  changed_when: false
+
+- name: Notify a reload when a managed export is configured but not live
+  ansible.builtin.debug:
+    msg: >-
+      Export {{ item.path }} is present in nfssetting but absent from the
+      running server - reloading NFS to regenerate it.
+  loop: "{{ qnap_managed_exports | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.path not in qnap_live_exports.stdout
+  notify: Restart QNAP NFS service

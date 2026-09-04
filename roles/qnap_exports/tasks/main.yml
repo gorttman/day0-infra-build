@@ -18,3 +18,10 @@
 
 - name: Include squash-setting tasks
   ansible.builtin.include_tasks: ensure_squash.yml
+
+# Last, deliberately: the three tasks above reconcile the config file, so
+# any edit they make has already been written by the time this compares
+# the file's intent against what the server is actually serving.
+- name: Include runtime-liveness tasks
+  ansible.builtin.include_tasks:
+    file: ensure_live.yml
