@@ -210,3 +210,11 @@ ls /srv/nfs/syslog-store/logging-syslog-storage-pvc-*/
 - [ ] syslog-ng receiving logs (`syslog-ng-ctl stats` shows TCP processed > 0)
 - [ ] Per-node log dirs present in `/srv/nfs/syslog-store/.../`
 - [ ] ArgoCD UI accessible at https://192.168.2.10:30443
+
+## Secrets applied outside ArgoCD
+
+`infra/unifi-tf-secrets` is applied by Ansible
+(`roles/unifi_tf_apply/files/unifi-tf-sealedsecret.yml`), not by the
+app-of-apps. It carries no ArgoCD tracking annotation, so it reads as
+unmanaged drift when auditing the cluster against Git. That is
+expected. Every other SealedSecret in the cluster is ArgoCD-managed.
