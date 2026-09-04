@@ -37,6 +37,13 @@ qnap_snapshot_sources:
     # a real promotion) - see roles/qnap_snapshot/HISTORY.md #2. Only
     # source wired to this so far; the other 7 still sync unconditionally.
     flag_file: .snapshot-pending
+  # Added 2026-09-04. 170G and previously in no backup at any tier -
+  # missed rather than excluded, since every real exclusion is
+  # documented in the comment above. This is the folder-based source
+  # of truth for the Immich external library; the /immich share only
+  # holds Immich's own library/thumbs/upload trees.
+  - name: photos
+    path: /share/CACHEDEV1_DATA/photos
   - name: vault
     path: /share/CACHEDEV1_DATA/vault
   - name: immich
