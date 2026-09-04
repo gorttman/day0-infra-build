@@ -1,0 +1,16 @@
+# orphan PV cleanup 2026-09-04-1743
+pvc-0f4f8ea6-8cd9-47bf-801f-b4658a4d349d	/srv/nfs/syslog-store/pihole-pihole-data-pvc-0f4f8ea6-8cd9-47bf-801f-b4658a4d349d	pihole/pihole-data	4.0K
+pvc-453af3d9-7a0c-4444-b2e2-6a70265762b8	/srv/nfs/syslog-store/vscode-server-vscode-server-data-pvc-453af3d9-7a0c-4444-b2e2-6a70265762b8	vscode-server/vscode-server-data	4.0K
+pvc-59998daa-001c-479b-b864-985c474435d7	/srv/nfs/syslog-store/paperless-paperless-media-pvc-59998daa-001c-479b-b864-985c474435d7	paperless/paperless-media	16K
+pvc-5f7eca90-3dfc-4d0a-9342-5065a2ef93d6	/srv/nfs/syslog-store/obsidian-obsidian-vault-pvc-5f7eca90-3dfc-4d0a-9342-5065a2ef93d6	obsidian/obsidian-vault	32K
+pvc-8a42319e-6d17-40f3-8b75-7911f2819b49	/srv/nfs/syslog-store/pihole-pihole-data-pvc-8a42319e-6d17-40f3-8b75-7911f2819b49	pihole/pihole-data	4.0K
+pvc-8b5d62e5-f87b-4f6b-8ceb-c397030f7cb7	/srv/nfs/syslog-store/obsidian-obsidian-vault-pvc-8b5d62e5-f87b-4f6b-8ceb-c397030f7cb7	obsidian/obsidian-vault	32K
+pvc-b199e0fc-1109-4e24-886b-378c3dd84cbe	/srv/nfs/syslog-store/paperless-paperless-media-pvc-b199e0fc-1109-4e24-886b-378c3dd84cbe	paperless/paperless-media	19M
+pvc-b8b5e2a0-b2d0-4442-9764-82ab83ba8ce2	/srv/nfs/syslog-store/pihole-pihole-data-pvc-b8b5e2a0-b2d0-4442-9764-82ab83ba8ce2	pihole/pihole-data	7.7M
+pvc-bc622870-0789-4661-9d43-3a411f9d5cc5	/srv/nfs/syslog-store/calibre-web-calibre-web-config-backup-pvc-bc622870-0789-4661-9d43-3a411f9d5cc5	calibre-web/calibre-web-config-backup	896K
+pvc-dde10340-45f0-4b8a-ad22-878ca6ab5f92	/srv/nfs/syslog-store/obsidian-obsidian-vault-pvc-dde10340-45f0-4b8a-ad22-878ca6ab5f92	obsidian/obsidian-vault	4.0K
+pvc-e0b95dd4-91bc-49dd-a5f1-dc03492ece88	/srv/nfs/syslog-store/obsidian-obsidian-vault-pvc-e0b95dd4-91bc-49dd-a5f1-dc03492ece88	obsidian/obsidian-vault	32K
+pvc-e699ae3e-b630-4f81-b958-7b3a84b50a60	/srv/nfs/syslog-store/kavita-kavita-config-backup-pvc-e699ae3e-b630-4f81-b958-7b3a84b50a60	kavita/kavita-config-backup	5.2M
+pvc-eee3872e-5037-48be-a118-f48cd6102fb7	/srv/nfs/syslog-store/vscode-server-vscode-server-data-pvc-eee3872e-5037-48be-a118-f48cd6102fb7	vscode-server/vscode-server-data	1.6M
+pvc-fb14f724-3c64-44c2-8137-efc5edee1c83	/srv/nfs/syslog-store/paperless-paperless-consume-pvc-fb14f724-3c64-44c2-8137-efc5edee1c83	paperless/paperless-consume	4.0K
+pvc-fd0d8910-1d0d-4145-8e4e-8bd61b44f5fe	/srv/nfs/syslog-store/obsidian-obsidian-vault-pvc-fd0d8910-1d0d-4145-8e4e-8bd61b44f5fe	obsidian/obsidian-vault	32K

@@ -31,3 +31,10 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Remediation queue runtime state - execution markers, per-item detail
+# logs and the run log are local bookkeeping, not code. The deletion
+# manifests ARE kept: they are the audit trail for what item 07 removed.
+remediation/state/*.done
+remediation/state/*.detail.log
+remediation/remediation.log
