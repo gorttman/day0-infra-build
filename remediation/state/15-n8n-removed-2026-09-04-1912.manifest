@@ -1,0 +1,19 @@
+# n8n namespace removal 2026-09-04-1912
+NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+service/n8n   ClusterIP   10.43.173.252   <none>        5678/TCP   59d
+
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/n8n   0/0     0            0           59d
+
+NAME                            DESIRED   CURRENT   READY   AGE
+replicaset.apps/n8n-6867dd985   0         0         0       59d
+
+NAME                             STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/n8n-data   Bound    pvc-38d4bbef-b4d2-44cb-b9e3-98e6a5969a85   2Gi        RWO            longhorn       <unset>                 46h
+
+NAME                            CLASS     HOSTS              ADDRESS          PORTS     AGE
+ingress.networking.k8s.io/n8n   traefik   n8n.i3sec.com.au   192.168.20.239   80, 443   59d
+
+NAME                 TYPE                DATA   AGE
+secret/n8n-secrets   Opaque              2      59d
+secret/n8n-tls       kubernetes.io/tls   2      59d
