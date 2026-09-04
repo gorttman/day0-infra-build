@@ -3,40 +3,68 @@
 ################################################################################
 ---
 # The other task files in this role reconcile /etc/config/nfssetting, the
-# flash-backed config QTS reloads from on boot. They cannot see whether
-# the *running* server actually serves those exports.
+# flash-backed config QTS reloads from at boot. They cannot see whether
+# the *running* server actually serves those exports, and those two
+# states genuinely diverge here: a QNAP reboot re-registers
+# external/USB-volume exports fresh and can silently drop one, leaving
+# nfssetting perfect and the export gone. Every other task then reports
+# no change, so nothing ever repairs it. /syslog-archive sat dead this
+# way for two months and kept log-archiver failing.
 #
-# Those two states genuinely diverge here. A QNAP reboot re-registers
-# external/USB-volume exports fresh and can silently drop them, leaving
-# nfssetting perfect and the export gone. Because every other task in
-# this role is check-then-fix against the file, they all report no change
-# and the restart handler never fires - so the export stays dead
-# indefinitely. /syslog-archive was in exactly this state for two months,
-# which is what kept log-archiver failing.
+# Repairing it needs more than the restart handler. Verified live
+# 2026-09-05: `/etc/init.d/nfs restart` does NOT rebuild /etc/exports
+# from nfssetting - only QTS's own apply path or a boot does that. So a
+# missing export must be re-created explicitly here.
 #
-# exportfs -v is the running server's own view, so comparing against it
-# catches the divergence the config-file checks structurally cannot.
+# Two entries are required per export, matching what QTS itself writes:
+# the real path, and a bind-mounted alias under /share/NFSv=4/ which is
+# what clients mounting the short name (qnap:/syslog-archive) actually
+# resolve through. NFSv3 clients cannot use the short name at all.
+#
+# Persistence across reboot still comes from nfssetting, which the rest
+# of this role owns - this file only closes the runtime gap.
 - name: Read the running NFS export table
   ansible.builtin.raw: exportfs -v
   register: qnap_live_exports
   changed_when: false
 
-- name: Notify a reload when a managed export is configured but not live
-  ansible.builtin.debug:
-    msg: >-
-      Export {{ item }} is present in nfssetting but absent from the
-      running server - reloading NFS to regenerate it.
-  # Union of every export this role manages. No default([]) filter on
-  # purpose: a mistyped variable must fail the run, not loop over an
-  # empty list and silently report success - which is the same class of
-  # silent no-op this whole task exists to catch.
-  loop: "{{ (qnap_nfs_acl + qnap_nfs_new_exports + qnap_nfs_squash)
-            | map(attribute='path') | unique | list }}"
+- name: Re-create managed exports that are configured but not live
+  ansible.builtin.raw: |
+    set -e
+    REAL="{{ item.path }}"
+    NAME="$(basename "$REAL")"
+    ALIAS="/share/NFSv=4/$NAME"
+    mkdir -p "$ALIAS"
+    mount | grep -q " $ALIAS " || mount --bind "$REAL" "$ALIAS"
+    {% for ip in item.allow_ip.split(',') %}
+    exportfs -o {{ item.permission.split(',')[loop.index0] }},async,no_subtree_check,insecure,{{ item.squash.split(',')[loop.index0] }} {{ ip }}:"$REAL"
+    exportfs -o {{ item.permission.split(',')[loop.index0] }},nohide,async,no_subtree_check,insecure,{{ item.squash.split(',')[loop.index0] }} {{ ip }}:"$ALIAS"
+    {% endfor %}
+  # No default([]) filter on purpose: a mistyped variable must fail the
+  # run rather than loop over nothing and report success, which is the
+  # same silent no-op this whole file exists to catch.
+  loop: "{{ qnap_nfs_acl }}"
   loop_control:
-    label: "{{ item }}"
-  when: item not in qnap_live_exports.stdout
-  # debug never reports changed on its own, and handlers only fire on a
-  # changed result - without this the detection logs the divergence and
-  # then does nothing about it.
-  changed_when: true
-  notify: Restart QNAP NFS service
+    label: "{{ item.path }}"
+  when: item.path not in qnap_live_exports.stdout
+  register: qnap_export_repair
+
+- name: Confirm every repaired export is now live
+  ansible.builtin.raw: exportfs -v
+  register: qnap_live_recheck
+  changed_when: false
+  when: qnap_export_repair is changed
+
+# Fail loudly rather than leave a silently-dead export behind - the whole
+# point of this file is that a quiet failure here goes unnoticed for
+# months.
+- name: Fail if a repaired export is still missing
+  ansible.builtin.assert:
+    that: item.path in qnap_live_recheck.stdout
+    fail_msg: "Export {{ item.path }} is still absent from the running server after repair"
+  loop: "{{ qnap_nfs_acl }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - qnap_export_repair is changed
+    - item.path not in qnap_live_exports.stdout
