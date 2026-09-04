@@ -1,0 +1,9 @@
+# syslog-store residue removal 2026-09-04-2100
+8.0K	/srv/nfs/syslog-store/homeassistant-mosquitto-data-pvc-96621011-1ab0-4b2e-aab7-81fb4446bcd2
+461M	/srv/nfs/syslog-store/postgres-postgres-data-postgres-0-pvc-e7ecf439-962b-48c3-8dd2-977842f04819
+786M	/srv/nfs/syslog-store/immich-immich-ml-cache-pvc-a604b7b8-4324-4bc2-8766-834b27ab7e14
+97M	/srv/nfs/syslog-store/monitoring-grafana-data-backup-pvc-5a7b2da6-36a9-4e49-88f6-4ef905fa93bc
+108K	/srv/nfs/syslog-store/homeassistant-homeassistant-config-backup-pvc-b3670574-2c83-491f-9b54-fe3f0342f0ea
+3.7G	/srv/nfs/syslog-store/logging-syslog-storage-pvc-36707232-51d6-4600-91cb-d9782b50331d
+20K	/srv/nfs/syslog-store/n8n-n8n-data-pvc-0c1e7033-d286-4e9f-8af3-f51bab03373e
+47M	/srv/nfs/syslog-store/paperless-paperless-data-pvc-d5831d0a-03ea-4012-8102-fcfc0915f9a8
