@@ -408,7 +408,7 @@ cmd_qnap_data() {
 # half of the rebuild simply cannot run. Keys reach the QNAP through the
 # nightly credentials/ rsync in roles/qnap_client.
 cmd_ssh_keys() {
-  local dryrun="" src="{{ credentials_backup_dir }}/ssh" dest="$HOME/.ssh"
+  local dryrun="" src="{{ credentials_backup_dir }}/ssh" dest="{{ ssh_keys_restore_dest }}"
   [ "${1:-}" = "--dry-run" ] && dryrun=1
   if [ ! -d "$src" ]; then
     echo "No SSH key backup at $src" >&2; return 1
@@ -421,7 +421,9 @@ cmd_ssh_keys() {
       echo "would restore $base -> $dest/$base"
     else
       mkdir -p "$dest"; chmod 700 "$dest"
+      chown {{ ssh_keys_restore_owner }} "$dest" 2>/dev/null || true
       cp -p "$f" "$dest/$base"
+      chown {{ ssh_keys_restore_owner }} "$dest/$base" 2>/dev/null || true
       case "$base" in *.pub) chmod 644 "$dest/$base" ;; *) chmod 600 "$dest/$base" ;; esac
     fi
     n=$((n+1))
@@ -436,7 +438,7 @@ cmd_ssh_keys() {
 # because the ad-hoc Jobs that consume it live there. Nothing syncs these,
 # so a rebuild must apply them explicitly.
 cmd_adhoc() {
-  local dryrun="" dir="$HOME/gm-dev/day2-services/adhoc"
+  local dryrun="" dir="{{ adhoc_manifest_dir }}"
   [ "${1:-}" = "--dry-run" ] && dryrun=1
   if [ ! -d "$dir" ]; then
     echo "No adhoc directory at $dir" >&2; return 1

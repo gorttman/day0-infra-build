@@ -29,3 +29,10 @@ qnap_snapshot_restore_targets:
   media: /mnt/media
   pihole: /mnt/pihole
   calibre-web: /mnt/calibre-web
+
+# restore.sh runs under sudo, so $HOME there is /root, not the operator's
+# home. Both of these must be absolute and explicit or the restore writes
+# keys and reads manifests from the wrong place - found live 2026-09-04.
+ssh_keys_restore_dest: /home/gorttman/.ssh
+ssh_keys_restore_owner: gorttman
+adhoc_manifest_dir: "{{ playbook_dir | dirname }}/day2-services/adhoc"
