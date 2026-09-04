@@ -24,10 +24,15 @@
 - name: Notify a reload when a managed export is configured but not live
   ansible.builtin.debug:
     msg: >-
-      Export {{ item.path }} is present in nfssetting but absent from the
+      Export {{ item }} is present in nfssetting but absent from the
       running server - reloading NFS to regenerate it.
-  loop: "{{ qnap_managed_exports | default([]) }}"
+  # Union of every export this role manages. No default([]) filter on
+  # purpose: a mistyped variable must fail the run, not loop over an
+  # empty list and silently report success - which is the same class of
+  # silent no-op this whole task exists to catch.
+  loop: "{{ (qnap_nfs_acl + qnap_nfs_new_exports + qnap_nfs_squash)
+            | map(attribute='path') | unique | list }}"
   loop_control:
-    label: "{{ item.path }}"
-  when: item.path not in qnap_live_exports.stdout
+    label: "{{ item }}"
+  when: item not in qnap_live_exports.stdout
   notify: Restart QNAP NFS service
