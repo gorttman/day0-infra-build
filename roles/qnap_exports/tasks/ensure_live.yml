@@ -35,4 +35,8 @@
   loop_control:
     label: "{{ item }}"
   when: item not in qnap_live_exports.stdout
+  # debug never reports changed on its own, and handlers only fire on a
+  # changed result - without this the detection logs the divergence and
+  # then does nothing about it.
+  changed_when: true
   notify: Restart QNAP NFS service
