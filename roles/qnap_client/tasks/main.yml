@@ -67,6 +67,10 @@
     label: "{{ item.path }} -> {{ item.export }}"
 
 - name: Ensure off-box credentials backup destination exists on the QNAP
+  # k8smaster only: the source directories for this live there and
+  # nowhere else. Before pinode-01 joined the inventory `hosts: all`
+  # meant one host, so these needed no condition.
+  when: inventory_hostname == 'k8smaster'
   ansible.builtin.file:
     path: "{{ credentials_backup_dest }}"
     state: directory
@@ -80,6 +84,10 @@
 # ansible.builtin.cron entry, not a self-rewriting script (that pattern
 # is what silently died last time - see docs/rebuild-gap-audit.md item 2).
 - name: Install daily off-box sync of credentials/ to the QNAP
+  # k8smaster only: the source directories for this live there and
+  # nowhere else. Before pinode-01 joined the inventory `hosts: all`
+  # meant one host, so these needed no condition.
+  when: inventory_hostname == 'k8smaster'
   ansible.builtin.cron:
     name: "Sync day0-infra-build credentials/ to QNAP backup share"
     minute: "30"
@@ -117,6 +125,10 @@
 # step does, and it fails loud (same mountpoint-guard pattern as
 # credentials-sync above) rather than hanging a Job.
 - name: Ensure postgres-backup's local staging directory exists with correct ownership
+  # k8smaster only: the source directories for this live there and
+  # nowhere else. Before pinode-01 joined the inventory `hosts: all`
+  # meant one host, so these needed no condition.
+  when: inventory_hostname == 'k8smaster'
   ansible.builtin.file:
     path: "{{ postgres_backup_staging_dir }}"
     state: directory
@@ -134,6 +146,10 @@
 # local disk) is what actually controls retention on both ends - this
 # step only ever reconciles, never decides what to keep.
 - name: Install sync of postgres-backup staging to the QNAP
+  # k8smaster only: the source directories for this live there and
+  # nowhere else. Before pinode-01 joined the inventory `hosts: all`
+  # meant one host, so these needed no condition.
+  when: inventory_hostname == 'k8smaster'
   ansible.builtin.cron:
     name: "Sync postgres-backup staging to QNAP"
     minute: "45"
@@ -152,6 +168,10 @@
 # prunes to 5 locally and mirroring that would discard history on every
 # rotation, so the destination prunes on its own count instead.
 - name: Install off-box sync of etcd snapshots to the QNAP
+  # k8smaster only: the source directories for this live there and
+  # nowhere else. Before pinode-01 joined the inventory `hosts: all`
+  # meant one host, so these needed no condition.
+  when: inventory_hostname == 'k8smaster'
   ansible.builtin.cron:
     name: "Sync k3s etcd snapshots to QNAP backup share"
     minute: "0"
