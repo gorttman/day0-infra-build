@@ -143,3 +143,24 @@
       rsync -rlpt --delete {{ postgres_backup_staging_dir }}/ {{ postgres_backup_sync_dest }}/
       >> /var/log/postgres-backup-sync.log 2>&1; else
       echo "$(date -Iseconds) ERROR: {{ postgres_backup_sync_dest | dirname | dirname }} is not mounted - refusing to sync, this would otherwise write to local disk" >> /var/log/postgres-backup-sync.log; fi
+
+# etcd snapshots were the one backup stream with no off-box copy at all
+# (found 2026-09-04): k3s kept 5 locally and nothing ever moved them, so
+# the snapshots would have died with the disk they protect against.
+# Same mountpoint-guard shape as the credentials sync above - a silently
+# dead /mnt/backup must fail loud, not fill local disk. No --delete: k3s
+# prunes to 5 locally and mirroring that would discard history on every
+# rotation, so the destination prunes on its own count instead.
+- name: Install off-box sync of etcd snapshots to the QNAP
+  ansible.builtin.cron:
+    name: "Sync k3s etcd snapshots to QNAP backup share"
+    minute: "0"
+    hour: "5"
+    job: >-
+      if mountpoint -q {{ etcd_snapshot_backup_dest | dirname }}; then
+      mkdir -p {{ etcd_snapshot_backup_dest }} &&
+      rsync -rlpt {{ etcd_snapshot_src }}/ {{ etcd_snapshot_backup_dest }}/
+      >> /var/log/etcd-snapshot-sync.log 2>&1 &&
+      ls -1t {{ etcd_snapshot_backup_dest }}/etcd-snapshot-* 2>/dev/null
+      | tail -n +{{ etcd_snapshot_backup_keep | int + 1 }} | xargs -r rm -f; else
+      echo "$(date -Iseconds) ERROR: {{ etcd_snapshot_backup_dest | dirname }} is not mounted - refusing to sync, this would otherwise write to local disk" >> /var/log/etcd-snapshot-sync.log; fi

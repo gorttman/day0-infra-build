@@ -108,6 +108,13 @@ qnap_host_mounts:
 # landing at the export root.
 credentials_backup_dest: /mnt/backup/k8smaster-credentials
 
+# k3s writes etcd snapshots here every 12h and keeps 5. They never left
+# this host until 2026-09-04, so an NVMe failure took all cluster state
+# with it despite snapshots existing.
+etcd_snapshot_src: /var/lib/rancher/k3s/server/db/snapshots
+etcd_snapshot_backup_dest: /mnt/backup/k8smaster-etcd-snapshots
+etcd_snapshot_backup_keep: 14
+
 # postgres-backup's local staging directory on k8smaster - see the
 # staging-then-sync task below for why. Not under /mnt/ deliberately:
 # that prefix means "an actual external mount" everywhere else in this
