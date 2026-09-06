@@ -7,17 +7,24 @@
 # "Internet 1" (purpose = wan) is intentionally NOT declared here - it's
 # the system-managed WAN network, not a candidate for unifi_network.
 #
-# THE ONE DELIBERATE CODE-AHEAD-OF-LIVE DIVERGENCE (audit 2026-09-03):
-# every other file in this directory is written to match the console
-# exactly - the UDM is the authoritative source, and code is corrected to
-# it, not the reverse. `dhcp_dns` is the single deliberate exception, on
-# the user's explicit call: the three-entry list below is CORRECT and the
-# console is what's wrong. Live is still handing out only 192.168.2.245 on
-# all four DHCP networks, so commits 41cb0c7 ("hand out both Pi-holes") and
-# f9b4f21 ("add 1.1.1.2 as the final fallback") are committed but never
-# applied. A plan will therefore show 4 networks to change until someone
-# runs the playbook with -e unifi_tf_do_apply=true. That is expected drift,
-# not a mistake to be "fixed" by editing these values back down.
+# THE ONE DELIBERATE CODE-AHEAD-OF-LIVE DIVERGENCE (audit 2026-09-03,
+# revised 2026-09-06): every other file in this directory is written to
+# match the console exactly - the UDM is the authoritative source, and
+# code is corrected to it, not the reverse. `dhcp_dns` is the single
+# deliberate exception, on the user's explicit call. The list below is
+# ["192.168.20.245", "192.168.20.246"] - both Pi-hole VIPs, no public
+# fallback.
+#
+# 2026-09-06: 1.1.1.2 was removed from this list. It had been the third
+# entry since commit f9b4f21 and caused its third split-horizon incident
+# that day (MetalLB L2 split-brain flapped both Pi-hole VIPs at once,
+# clients latched onto the Cloudflare fallback, every *.i3sec.com.au name
+# went to the Cloudflare edge). The user removed it from the console
+# directly. See the Default resource's dhcp_dns comment and
+# project_split_horizon_dns_fix for the full history. A plan may still
+# show a diff on the other dhcp_dns entries depending on what was last
+# actually applied - reconcile by running the playbook with
+# -e unifi_tf_do_apply=true, not by editing these values.
 #
 # METHODOLOGY NOTE (learned the hard way via the dry-run, see HISTORY.md):
 # "no documented default -> safe to leave undeclared, Terraform adopts
@@ -78,23 +85,28 @@ resource "unifi_network" "default" {
   # Single DNS server: if Pi-hole is ever actually down, resolution
   # should fail loudly, not silently return a wrong answer.
   # Two Pi-holes since 2026-09-03 (day2-services/apps/pihole), anchored to
-  # different nodes with their VIPs so they cannot fail together, plus
-  # 1.1.1.2 as a third and final entry.
+  # different nodes with their VIPs so they cannot fail together. No public
+  # fallback.
   #
-  # That third entry deliberately reverses the 2026-08-25 decision above, and
-  # it is worth being honest that the reasoning there still holds: a public
-  # resolver has no knowledge of *.i3sec.com.au, and a client that falls back
-  # to it gets a working-looking public answer rather than an error. Resolvers
-  # do not reliably try the list in order - several race or round-robin - so
-  # this is not purely a last-resort path. What changed is the other side of
-  # the trade: with one Pi-hole, the fallback fired on every routine restart,
-  # which is exactly how the iPad/TV "works, then doesn't" symptom happened.
-  # With two on separate nodes it should only fire if both are gone, and in
-  # that case the choice is a wrong answer for internal names or no internet
-  # at all. Accepted knowingly, not inherited.
+  # 2026-09-06: 1.1.1.2 (Cloudflare's malware-blocking resolver) removed -
+  # third time this exact trade has been re-litigated, third time the
+  # fallback caused the outage it was meant to prevent. It was re-added on
+  # 2026-09-03 on the reasoning that two Pi-holes on separate nodes made a
+  # public last-resort safe (it "should only fire if both are gone"). Then a
+  # MetalLB L2 split-brain (project_metallb_stale_bind_after_migration) made
+  # BOTH Pi-hole VIPs flap at once for hours; clients fell to 1.1.1.2,
+  # latched onto it, and every *.i3sec.com.au name resolved to the
+  # Cloudflare edge - jellyfin (no public A record) failed outright, tunnel
+  # hostnames hit the zero-trust mTLS client-cert prompt. Diagnosed at first
+  # as an iPad WARP problem; WARP was off the whole time.
   #
-  # 1.1.1.2 (not 1.1.1.1) is Cloudflare's malware-blocking resolver, matching
-  # what Pi-hole itself forwards to.
+  # The 2026-08-25 reasoning holds and keeps being proven: a client that
+  # falls back to a public resolver gets a working-looking wrong answer
+  # instead of a loud failure, and OS resolvers race the list rather than
+  # trying it in order, so a "last resort" entry is not last-resort. If both
+  # Pi-holes are down, internal DNS should fail visibly, not resolve to the
+  # public internet. Do not re-add a public resolver here without a fourth
+  # incident to justify reversing this again.
   #
   # 2026-09-03: moved from 192.168.2.245/.246 to 192.168.20.245/.246. The
   # resolvers left the WLAN for Trusted - same last octets, new subnet. The
@@ -102,7 +114,7 @@ resource "unifi_network" "default" {
   # drops gratuitous ARP for claimed IPs); they were a /32 hand-bound on a
   # node's wlan0, which did not survive a reboot. Cross-VLAN reachability was
   # proven before this changed, not assumed.
-  dhcp_dns = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
+  dhcp_dns = ["192.168.20.245", "192.168.20.246"]
 
   igmp_snooping         = false
   dhcp_guarding         = false # live: dhcpguard_enabled
@@ -187,9 +199,9 @@ resource "unifi_network" "trusted" {
   # each other, and the resulting duplicate-IP fault would land on DNS, which
   # is the worst possible place for it.
   dhcp_stop    = "192.168.20.229"
-  # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
-  # see the full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
+  # Both Pi-hole VIPs, no public fallback - same list as Default, see the
+  # full rationale in the Default resource above.
+  dhcp_dns     = ["192.168.20.245", "192.168.20.246"]
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -221,9 +233,9 @@ resource "unifi_network" "guest" {
   dhcp_enabled = true
   dhcp_start   = "192.168.30.6"
   dhcp_stop    = "192.168.30.239"
-  # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
-  # see the full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
+  # Both Pi-hole VIPs, no public fallback - same list as Default, see the
+  # full rationale in the Default resource above.
+  dhcp_dns     = ["192.168.20.245", "192.168.20.246"]
 
   igmp_snooping         = false
   dhcp_guarding         = false
@@ -253,9 +265,9 @@ resource "unifi_network" "iot" {
   dhcp_enabled = true
   dhcp_start   = "192.168.40.6"
   dhcp_stop    = "192.168.40.239"
-  # Both Pi-holes plus the 1.1.1.2 final fallback - same list as Default,
-  # see the full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.20.245", "192.168.20.246", "1.1.1.2"]
+  # Both Pi-hole VIPs, no public fallback - same list as Default, see the
+  # full rationale in the Default resource above.
+  dhcp_dns     = ["192.168.20.245", "192.168.20.246"]
 
   igmp_snooping         = false
   dhcp_guarding         = false

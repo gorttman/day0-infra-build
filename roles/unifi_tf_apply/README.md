@@ -24,6 +24,14 @@ now returns `No changes`.** What that audit changed:
   verifying both Pi-holes actually answer (the 2026-08-23 incident was
   exactly this failure, unverified). This is the ONE case where the
   console was corrected to match code rather than the reverse.
+  **UPDATE 2026-09-06:** the `1.1.1.2` fallback was removed again after
+  it caused a third split-horizon incident (MetalLB L2 split-brain
+  flapped both Pi-hole VIPs, clients latched onto the Cloudflare
+  fallback, `*.i3sec.com.au` names resolved to the public edge). Code
+  is now `["192.168.20.245", "192.168.20.246"]` on all four networks -
+  both Pi-holes, no public fallback. See `network.tf`'s Default
+  resource comment. If a plan shows a `dhcp_dns` diff, reconcile by
+  applying, not by editing the values back.
 - ACL-based IoT<->Trusted isolation DROPPED (was "deferred") on the
   user's call. The live test rule from 2026-08-29 is gone on its own -
   see `firewall.tf`. Consequence: no IoT<->Trusted isolation exists;
