@@ -69,3 +69,43 @@ of this entry. Retiring them needs to include manually removing the
 already-pushed script and crontab entry from the QNAP itself, not just
 deleting the Ansible tasks — Ansible only ever managed "ensure
 present," never cleanup of retired state.
+
+## 4. Fix, part 2b: per-source cron jobs, since part 2 (move off QNAP
+## entirely) still wasn't built (2026-09-22)
+
+This role's own predicted failure mode from #1 happened again — this
+time coinciding with (and likely aggravated by) heavy concurrent
+inbound writes from arr-stack, which the original script had zero
+awareness of or throttling against. Part 2 above (move execution off
+the QNAP to a k8s CronJob with real RAM headroom) is still the more
+durable eventual fix and remains unbuilt, but in the meantime this
+closes the same class of failure from the QNAP side:
+
+- **Split into one cron entry per source** (`qnap-snapshot.sh <source>`,
+  or `--prune`) instead of one script looping through all of them.
+  Pacing via `sleep` was considered and rejected — a sleeping process
+  is still resident and only gives the kernel an *opportunity* to
+  reclaim cache; a fully exited process forces it. 10 separate cron
+  triggers, `flock`-serialized against the same lock file, get a hard
+  guarantee instead of a hope.
+- **Explicit `sync && echo 2 > /proc/sys/vm/drop_caches`** at the end
+  of every per-source run — directly forces the dentry/inode reclaim
+  that #1's root cause needed, rather than relying on the kernel's own
+  (lazy, not guaranteed promptly on a ~1GB box) reclaim timing.
+- **`ionice -c2 -n7` (best-effort, lowest priority), not `-c3` (idle)**
+  — idle only gets I/O when the disk is completely quiet, which under
+  arr-stack's sustained writes may never happen, so the job could
+  starve to near-zero throughput and effectively never finish.
+  Best-effort still competes, just at the bottom of the queue — slows
+  down under contention, doesn't stall.
+- **`nice -n19`** (lowest CPU priority) and **`rsync --bwlimit`**
+  (default 20MB/s, `qnap_snapshot_bwlimit_kbps`) alongside it, so the
+  job doesn't burst back to full speed the instant a gap opens up.
+- **Schedule moved to start at 23:59** (low real usage then, per
+  direct ask) with 20-minute gaps between each of the 10 entries,
+  landing at 23:59-02:59. This pushed `postgres-backup` from 02:00 to
+  03:30 (day2-services `apps/postgres/postgres-backup-cronjob.yml`) to
+  keep those 20-minute recovery gaps intact rather than compressing
+  them to fit around postgres-backup's old slot — the credentials
+  rsync at 04:30 (`roles/qnap_client`) still has an hour of margin
+  after that.

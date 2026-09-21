@@ -18,6 +18,16 @@
     mkdir -p $(dirname {{ qnap_snapshot_script_path }})
   changed_when: true
 
+# Rewritten 2026-09-22 (see roles/qnap_snapshot/HISTORY.md #4): one
+# script invocation now backs up exactly one source (or prunes), driven
+# by $1, instead of looping through all 8/9 sources back-to-back in a
+# single process. Cron now fires 10 separate staggered invocations
+# (see variables/play/qnap_backup_cron.yml) so each source gets a fully
+# exited process - not just a sleeping one - before the next starts,
+# which is what actually gives the kernel a hard-guaranteed chance to
+# reclaim dentry/inode cache rather than merely hoping it does during a
+# pause. flock in the cron command (not in here) serializes the whole
+# set so a slow-running source can't overlap the next one's start.
 - name: Push the snapshot script and make it executable
   ansible.builtin.raw: |
     cat > {{ qnap_snapshot_script_path }} <<'QNAP_SNAPSHOT_EOF'
@@ -26,6 +36,8 @@
     # will be overwritten on the next Ansible run. Edit
     # variables/play/qnap_snapshot.yml and roles/qnap_snapshot instead.
     set -eu
+
+    MODE="${1:-}"
 
     BACKUP_ROOT={{ qnap_backup_disk_root }}/active_backup/qnap-data
     DAILY_DIR="$BACKUP_ROOT/daily"
@@ -42,83 +54,107 @@
     WEEKLY_KEEP={{ qnap_snapshot_weekly_keep }}
     MONTHLY_KEEP={{ qnap_snapshot_monthly_keep }}
 
+    # Best-effort (class 2), not idle (class 3) - idle only runs when
+    # the disk is completely quiet, which under arr-stack's sustained
+    # inbound writes may never happen, so the backup could stall
+    # indefinitely instead of just slowing down. Best-effort at the
+    # lowest priority level still gets a small guaranteed share.
+    # --bwlimit smooths the job's own throughput so it doesn't burst
+    # the moment a gap opens up.
+    RSYNC="ionice -c{{ qnap_snapshot_ionice_class }} -n{{ qnap_snapshot_ionice_level }} nice -n{{ qnap_snapshot_nice_level }} rsync -a --bwlimit={{ qnap_snapshot_bwlimit_kbps }}"
+
+    # Forces reclaim of the dentry/inode cache built up by this
+    # source's stat()-heavy tree-walk, rather than hoping the kernel
+    # gets to it before the next source's process starts. This is the
+    # direct fix for the OOM root cause in HISTORY.md #1 - pacing alone
+    # only gives the kernel an *opportunity*, this gives it a reason.
+    drop_caches() {
+      sync
+      echo 2 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    }
+
+    if [ "$MODE" = "--prune" ]; then
+      prune_generations() {
+        dir="$1"; keep="$2"
+        i=0
+        for d in $(ls -1t "$dir" 2>/dev/null); do
+          i=$((i + 1))
+          if [ "$i" -gt "$keep" ]; then
+            rm -rf "${dir:?}/${d:?}"
+          fi
+        done
+      }
+      prune_generations "$DAILY_DIR" "$DAILY_KEEP"
+      prune_generations "$WEEKLY_DIR" "$WEEKLY_KEEP"
+      prune_generations "$MONTHLY_DIR" "$MONTHLY_KEEP"
+      echo "[*] Prune complete: $(date)"
+      exit 0
+    fi
+
+    case "$MODE" in
+    {% for src in qnap_snapshot_sources %}
+      {{ src.name }})
+        SRC_PATH="{{ src.path }}"
+        FLAG="{{ src.flag_file | default('') }}"
+        EXCLUDE_ARGS="{% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}"
+        ;;
+    {% endfor %}
+      *)
+        echo "usage: $0 <source>|--prune" >&2
+        echo "  <source> is one of:{% for src in qnap_snapshot_sources %} {{ src.name }}{% endfor %}" >&2
+        exit 1
+        ;;
+    esac
+
     mkdir -p "$DAILY_DIR" "$WEEKLY_DIR" "$MONTHLY_DIR"
-
     TODAY_DIR="$DAILY_DIR/$DATE"
-    # Most recent *existing* daily generation, found before today's
-    # directory is created below so it never matches itself.
-    PREV_DIR=$(ls -1dt "$DAILY_DIR"/*/ 2>/dev/null | head -1)
-
+    # Most recent *existing* daily generation, excluding today's own
+    # directory - matters now that a same-day source running later
+    # (e.g. calibre-web at 02:39) would otherwise see the directory an
+    # earlier source (e.g. books at 23:59) already created today and
+    # wrongly diff against itself instead of yesterday's real snapshot.
+    PREV_DIR=$(ls -1dt "$DAILY_DIR"/*/ 2>/dev/null | grep -v "/${DATE}/\$" | head -1)
     mkdir -p "$TODAY_DIR"
 
-    {% for src in qnap_snapshot_sources %}
-    {% if src.flag_file is defined %}
-    # flag_file sources (see roles/qnap_snapshot/README or the producer
-    # that touches this) only get the real rsync - the expensive
-    # full-tree walk against the live source - when the producer has
-    # actually written something since the last run. A quiet night costs
-    # one stat() here instead of a --link-dest diff over the whole tree,
-    # which is the entire point: this is what stops a many-file, mostly-
-    # unchanged source from paying full metadata-scan cost every single
-    # night regardless of whether anything happened.
-    if [ -f "{{ src.path }}/{{ src.flag_file }}" ]; then
-      echo "[*] Syncing {{ src.name }} (flagged pending)"
-      if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}{{ src.name }}" ]; then
-        rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}--exclude={{ src.flag_file }} --link-dest="${PREV_DIR}{{ src.name }}" "{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
+    if [ -n "$FLAG" ]; then
+      if [ -f "$SRC_PATH/$FLAG" ]; then
+        echo "[*] Syncing $MODE (flagged pending)"
+        if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}${MODE}" ]; then
+          $RSYNC $EXCLUDE_ARGS --exclude="$FLAG" --link-dest="${PREV_DIR}${MODE}" "$SRC_PATH/" "$TODAY_DIR/$MODE/"
+        else
+          $RSYNC $EXCLUDE_ARGS --exclude="$FLAG" "$SRC_PATH/" "$TODAY_DIR/$MODE/"
+        fi
+        rm -f "$SRC_PATH/$FLAG"
       else
-        rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}--exclude={{ src.flag_file }} "{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
+        echo "[*] Skipping $MODE (nothing flagged since last run)"
       fi
-      rm -f "{{ src.path }}/{{ src.flag_file }}"
     else
-      echo "[*] Skipping {{ src.name }} (nothing flagged since last run)"
+      echo "[*] Syncing $MODE"
+      if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}${MODE}" ]; then
+        $RSYNC $EXCLUDE_ARGS --link-dest="${PREV_DIR}${MODE}" "$SRC_PATH/" "$TODAY_DIR/$MODE/"
+      else
+        $RSYNC $EXCLUDE_ARGS "$SRC_PATH/" "$TODAY_DIR/$MODE/"
+      fi
     fi
-    {% else %}
-    echo "[*] Syncing {{ src.name }}"
-    if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}{{ src.name }}" ]; then
-      rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}--link-dest="${PREV_DIR}{{ src.name }}" "{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
-    else
-      rsync -a {% for ex in src.excludes | default([]) %}--exclude={{ ex }} {% endfor %}"{{ src.path }}/" "$TODAY_DIR/{{ src.name }}/"
-    fi
-    {% endif %}
-    {% endfor %}
 
-    # Promotion is per-source and looks up each source's own most recent
-    # daily generation, rather than assuming $TODAY_DIR has everything -
-    # a flag_file source skipped tonight still needs to land in this
-    # week's/month's tier, just from an older day's folder instead of
-    # today's. Only a directory-listing lookup to find the right day;
-    # the actual hardlink-clone walk still only happens at weekly/monthly
-    # cadence per source, same as before this change.
-    {% for src in qnap_snapshot_sources %}
-    SRC_DAILY_DIR=$(ls -1dt "$DAILY_DIR"/*/{{ src.name }} 2>/dev/null | head -1)
+    # Promotion looks up this source's own most recent daily
+    # generation rather than assuming $TODAY_DIR has it - a flag_file
+    # source skipped tonight still needs to land in this week's/
+    # month's tier, just from an older day's folder instead of today's.
+    SRC_DAILY_DIR=$(ls -1dt "$DAILY_DIR"/*/$MODE 2>/dev/null | head -1)
     if [ -n "$SRC_DAILY_DIR" ]; then
       if [ "$DOW" = "7" ]; then
-        echo "[*] Promoting {{ src.name }} to weekly"
-        rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$WEEKLY_DIR/$WEEK_TAG/{{ src.name }}/"
+        echo "[*] Promoting $MODE to weekly"
+        rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$WEEKLY_DIR/$WEEK_TAG/$MODE/"
       fi
       if [ "$DOM" = "01" ]; then
-        echo "[*] Promoting {{ src.name }} to monthly"
-        rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$MONTHLY_DIR/$MONTH_TAG/{{ src.name }}/"
+        echo "[*] Promoting $MODE to monthly"
+        rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$MONTHLY_DIR/$MONTH_TAG/$MODE/"
       fi
     fi
-    {% endfor %}
 
-    # prune_generations <dir> <keep>
-    prune_generations() {
-      dir="$1"; keep="$2"
-      i=0
-      for d in $(ls -1t "$dir" 2>/dev/null); do
-        i=$((i + 1))
-        if [ "$i" -gt "$keep" ]; then
-          rm -rf "${dir:?}/${d:?}"
-        fi
-      done
-    }
-    prune_generations "$DAILY_DIR" "$DAILY_KEEP"
-    prune_generations "$WEEKLY_DIR" "$WEEKLY_KEEP"
-    prune_generations "$MONTHLY_DIR" "$MONTHLY_KEEP"
-
-    echo "[*] QNAP data snapshot complete: $(date)"
+    drop_caches
+    echo "[*] $MODE snapshot complete: $(date)"
     QNAP_SNAPSHOT_EOF
     chmod +x {{ qnap_snapshot_script_path }}
   changed_when: true

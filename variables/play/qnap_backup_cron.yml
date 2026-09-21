@@ -9,14 +9,53 @@
 # exports (/etc/config/nfssetting, see docs/rebuild-runbook.md Step 5).
 qnap_crontab_file: /etc/config/crontab
 
+# Rewritten 2026-09-22 (see roles/qnap_snapshot/HISTORY.md #4): one
+# entry per source instead of one entry running all of them, so each
+# source is a fully separate process that exits completely before the
+# next starts - real memory reclaim, not just an in-process pause.
+# 20-minute gaps starting at 23:59 (requested start time - low real
+# usage then). flock on a shared lock file serializes the set so a
+# slow-running source can't overlap the next one's start; it *waits*
+# rather than skipping, matching "slow down, don't stop".
+#
+# 23:59-02:59 was chosen to still land entirely before postgres-backup,
+# which moved from 02:00 to 03:30 for exactly this reason (see
+# day2-services apps/postgres/postgres-backup-cronjob.yml) - keeping
+# these 20-minute recovery gaps intact rather than compressing them to
+# fit around postgres-backup's old slot. The credentials rsync
+# (roles/qnap_client) at 04:30 still has an hour of margin after that.
+#
 # name must be unique: it doubles as the idempotency marker (a trailing
 # crontab comment), not just a label, so re-running the play doesn't
 # duplicate the line.
-#
-# 03:00, deliberately between postgres-backup's 02:00 (day2-services
-# apps/postgres) and the credentials rsync's 04:30
-# (roles/qnap_client) - avoids all three ever overlapping.
 qnap_cron_jobs:
-  - name: qnap-data-snapshot
-    schedule: "0 3 * * *"
-    command: "{{ qnap_snapshot_script_path }} >> /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.log 2>&1"
+  - name: qnap-data-snapshot-books
+    schedule: "59 23 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} books >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-photos
+    schedule: "19 0 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} photos >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-vault
+    schedule: "39 0 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} vault >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-immich
+    schedule: "59 0 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} immich >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-paperless
+    schedule: "19 1 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} paperless >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-inbox
+    schedule: "39 1 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} inbox >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-media
+    schedule: "59 1 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} media >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-pihole
+    schedule: "19 2 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} pihole >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-calibre-web
+    schedule: "39 2 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} calibre-web >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-prune
+    schedule: "59 2 * * *"
+    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} --prune >> {{ qnap_snapshot_log_file }} 2>&1"

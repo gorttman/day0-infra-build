@@ -3,6 +3,11 @@
 ################################################################################
 ---
 qnap_snapshot_script_path: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.sh
+qnap_snapshot_log_file: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.log
+# Added 2026-09-22 alongside the split into per-source cron jobs -
+# shared across all 10 entries so flock actually serializes the whole
+# set against each other, not just pairs.
+qnap_snapshot_lock_file: /var/lock/qnap-snapshot.lock
 
 # Retention matches the DB backups' scheme (7 daily / 4 weekly / 13
 # monthly - 12 completed months + the current in-progress one) for a
@@ -11,6 +16,20 @@ qnap_snapshot_script_path: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.sh
 qnap_snapshot_daily_keep: 7
 qnap_snapshot_weekly_keep: 4
 qnap_snapshot_monthly_keep: 13
+
+# Added 2026-09-22 after the qnap-data-snapshot job coincided with a
+# QNAP crash under arr-stack's inbound write load - see
+# roles/qnap_snapshot/HISTORY.md #4. ionice best-effort (not idle -
+# idle can starve to near-zero under sustained competing writes and
+# never finish) plus lowest CPU niceness plus a bandwidth cap, so the
+# job yields to real activity and slows down rather than either
+# competing for resources or stalling indefinitely. 20000 KB/s
+# (~20MB/s) is a conservative starting point - tune after watching a
+# real run.
+qnap_snapshot_ionice_class: 2
+qnap_snapshot_ionice_level: 7
+qnap_snapshot_nice_level: 19
+qnap_snapshot_bwlimit_kbps: 20000
 
 # Source list finalized 2026-08-10 (see day2-services
 # project_qnap_backup_design memory for the full reasoning trail).
