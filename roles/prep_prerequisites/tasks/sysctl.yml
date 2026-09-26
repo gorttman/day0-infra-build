@@ -1,0 +1,35 @@
+---
+# k3s nodes run every pod's containerd-shim and file watcher as UID 0 on the
+# host. The kernel default fs.inotify.max_user_instances=128 is a per-UID cap,
+# so once enough pods run, a new pod that needs a FileSystemWatcher (Jellyfin,
+# any .NET app) crash-loops with "user limit (128) on inotify instances".
+- name: Raise inotify limits for k3s node density
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-inotify.conf
+    sysctl_set: true
+    reload: true
+  loop:
+    - { name: fs.inotify.max_user_instances, value: "1024" }
+    - { name: fs.inotify.max_user_watches, value: "524288" }
+  become: true
+
+# gluetun (the arr-stack VPN sidecar) opens /dev/net/tun. It only works if the
+# tun module available on whichever node the pod lands on; without a persisted
+# entry it depends on on-demand autoload at first open.
+- name: Load the tun module now and on every boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k3s-tun.conf
+    content: "tun\n"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Ensure the tun module is loaded in the running kernel
+  community.general.modprobe:
+    name: tun
+    state: present
+  become: true
+
