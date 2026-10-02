@@ -9,53 +9,74 @@
 # exports (/etc/config/nfssetting, see docs/rebuild-runbook.md Step 5).
 qnap_crontab_file: /etc/config/crontab
 
-# Rewritten 2026-09-22 (see roles/qnap_snapshot/HISTORY.md #4): one
-# entry per source instead of one entry running all of them, so each
-# source is a fully separate process that exits completely before the
-# next starts - real memory reclaim, not just an in-process pause.
-# 20-minute gaps starting at 23:59 (requested start time - low real
-# usage then). flock on a shared lock file serializes the set so a
-# slow-running source can't overlap the next one's start; it *waits*
-# rather than skipping, matching "slow down, don't stop".
+# Rewritten 2026-10-03 (see roles/qnap_snapshot/HISTORY.md #5): no
+# longer wraps each command in `flock` - that binary doesn't exist on
+# this BusyBox, which meant every one of these entries had been dying
+# on its first line since 2026-09-22. Locking now happens inside
+# qnap-snapshot.sh itself (a plain `mkdir`-based lockdir), so the cron
+# command is just the script invocation.
 #
-# 23:59-02:59 was chosen to still land entirely before postgres-backup,
-# which moved from 02:00 to 03:30 for exactly this reason (see
-# day2-services apps/postgres/postgres-backup-cronjob.yml) - keeping
-# these 20-minute recovery gaps intact rather than compressing them to
-# fit around postgres-backup's old slot. The credentials rsync
-# (roles/qnap_client) at 04:30 still has an hour of margin after that.
+# Stable, quick sources keep the original 20-minute-gap staggered
+# schedule starting at 23:59 (low real usage then, per direct ask),
+# landing at 23:59-02:19 plus prune at 02:19. mode: mirror sources
+# (photos, media - see variables/play/qnap_snapshot.yml) moved to the
+# END of the schedule, after prune, deliberately: they're the two
+# sources that can legitimately run for hours while catching up from
+# an active migration, and the shared lock means they'd otherwise hold
+# up every other source behind them for however long that takes. This
+# way the 7 fast/stable sources + prune still reliably land in their
+# intended overnight window regardless of how long photos/media take.
+#
+# This still lands entirely before postgres-backup (02:00 originally,
+# moved to 03:30 on 2026-09-22 for exactly this reason - see
+# day2-services apps/postgres/postgres-backup-cronjob.yml) for the 7
+# stable sources + prune; photos/media spilling past that into the
+# morning is an accepted tradeoff of the interim mirror mode, not an
+# oversight - they don't touch postgres-backup's export at all.
 #
 # name must be unique: it doubles as the idempotency marker (a trailing
 # crontab comment), not just a label, so re-running the play doesn't
-# duplicate the line.
+# duplicate the line. The qnap_cron role only ever appends a missing
+# name - changing an existing entry's command/schedule without also
+# changing its name requires manually removing the old line from the
+# live crontab first (confirmed needed 2026-10-03, see HISTORY.md #5).
 qnap_cron_jobs:
-  - name: qnap-data-snapshot-books
+  - name: qnap-data-snapshot-books-v2
     schedule: "59 23 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} books >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-photos
+    command: "{{ qnap_snapshot_script_path }} books >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-vault-v2
     schedule: "19 0 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} photos >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-vault
+    command: "{{ qnap_snapshot_script_path }} vault >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-immich-v2
     schedule: "39 0 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} vault >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-immich
+    command: "{{ qnap_snapshot_script_path }} immich >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-paperless-v2
     schedule: "59 0 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} immich >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-paperless
+    command: "{{ qnap_snapshot_script_path }} paperless >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-inbox-v2
     schedule: "19 1 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} paperless >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-inbox
+    command: "{{ qnap_snapshot_script_path }} inbox >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-pihole-v2
     schedule: "39 1 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} inbox >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-media
+    command: "{{ qnap_snapshot_script_path }} pihole >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-calibre-web-v2
     schedule: "59 1 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} media >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-pihole
+    command: "{{ qnap_snapshot_script_path }} calibre-web >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-prune-v2
     schedule: "19 2 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} pihole >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-calibre-web
+    command: "{{ qnap_snapshot_script_path }} --prune >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-photos-v2
     schedule: "39 2 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} calibre-web >> {{ qnap_snapshot_log_file }} 2>&1"
-  - name: qnap-data-snapshot-prune
+    command: "{{ qnap_snapshot_script_path }} photos >> {{ qnap_snapshot_log_file }} 2>&1"
+  - name: qnap-data-snapshot-media-v2
     schedule: "59 2 * * *"
-    command: "flock {{ qnap_snapshot_lock_file }} {{ qnap_snapshot_script_path }} --prune >> {{ qnap_snapshot_log_file }} 2>&1"
+    command: "{{ qnap_snapshot_script_path }} media >> {{ qnap_snapshot_log_file }} 2>&1"
+  # Added 2026-09-18 alongside qnap_snapshot's throttle changes - see
+  # roles/qnap_snapshot/HISTORY.md #4/#5 and variables/play/
+  # qnap_stream_watcher.yml. Every 2 min rather than something coarser
+  # since the snapshot script's long_running sources re-check the flag
+  # on the same cadence (qnap_snapshot_throttle_recheck_seconds) - no
+  # point polling Jellyfin faster than that number is consulted.
+  - name: qnap-stream-watcher
+    schedule: "*/{{ qnap_stream_watcher_interval_minutes }} * * * *"
+    command: "{{ qnap_stream_watcher_script_path }} >> /share/CACHEDEV1_DATA/.scripts/qnap-stream-watcher.log 2>&1"

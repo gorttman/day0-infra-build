@@ -4,10 +4,6 @@
 ---
 qnap_snapshot_script_path: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.sh
 qnap_snapshot_log_file: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.log
-# Added 2026-09-22 alongside the split into per-source cron jobs -
-# shared across all 10 entries so flock actually serializes the whole
-# set against each other, not just pairs.
-qnap_snapshot_lock_file: /var/lock/qnap-snapshot.lock
 
 # Retention matches the DB backups' scheme (7 daily / 4 weekly / 13
 # monthly - 12 completed months + the current in-progress one) for a
@@ -17,19 +13,25 @@ qnap_snapshot_daily_keep: 7
 qnap_snapshot_weekly_keep: 4
 qnap_snapshot_monthly_keep: 13
 
-# Added 2026-09-22 after the qnap-data-snapshot job coincided with a
-# QNAP crash under arr-stack's inbound write load - see
-# roles/qnap_snapshot/HISTORY.md #4. ionice best-effort (not idle -
-# idle can starve to near-zero under sustained competing writes and
-# never finish) plus lowest CPU niceness plus a bandwidth cap, so the
-# job yields to real activity and slows down rather than either
-# competing for resources or stalling indefinitely. 20000 KB/s
-# (~20MB/s) is a conservative starting point - tune after watching a
-# real run.
-qnap_snapshot_ionice_class: 2
-qnap_snapshot_ionice_level: 7
-qnap_snapshot_nice_level: 19
+# Base bandwidth cap, always applied even with nobody streaming - a
+# conservative floor so the job never bursts to full disk/NIC speed.
+# ionice/nice were tried alongside this on 2026-09-22 and silently did
+# nothing (confirmed live 2026-10-03: neither binary exists on this
+# BusyBox) - bwlimit is the only real throttle mechanism here, see
+# roles/qnap_snapshot/HISTORY.md #5.
 qnap_snapshot_bwlimit_kbps: 20000
+
+# Streaming-aware throttle, added 2026-09-18 after the backup starved
+# NFS reads badly enough to stall Jellyfin playback for hours - see
+# roles/qnap_snapshot/HISTORY.md #4/#5 for the incident and the
+# reasoning. qnap_stream_watcher (separate role/cron, variables/play/
+# qnap_stream_watcher.yml) owns writing/removing this flag file based
+# on Jellyfin's active-session API; this script only ever reads it.
+qnap_snapshot_throttle_flag_file: /share/CACHEDEV1_DATA/.scripts/qnap-streaming-active
+qnap_snapshot_throttle_bwlimit_kbps: 3000
+# Only consulted by long_running sources (photos, media) - how often
+# they re-check the flag and restart with a new limit mid-run.
+qnap_snapshot_throttle_recheck_seconds: 120
 
 # Source list finalized 2026-08-10 (see day2-services
 # project_qnap_backup_design memory for the full reasoning trail).
@@ -49,6 +51,14 @@ qnap_snapshot_bwlimit_kbps: 20000
 # isn't. Left as-is rather than renamed, since renaming a live,
 # already-exported directory is a separate, riskier change than this
 # backup job needs to make.
+#
+# mode: mirror (2026-10-03, HISTORY.md #6) - interim, additive-only
+# flat copy instead of the normal generational --link-dest backup, for
+# a source that's actively migrating/churning right now so badly that
+# generational snapshotting means re-walking a moving target every
+# night. Remove this key once the source has caught up (watch the
+# --stats line in qnap-snapshot.log for "files transferred" trending
+# to near-zero) to return it to normal generational backup.
 qnap_snapshot_sources:
   - name: books
     path: /share/CACHEDEV1_DATA/books
@@ -61,8 +71,19 @@ qnap_snapshot_sources:
   # documented in the comment above. This is the folder-based source
   # of truth for the Immich external library; the /immich share only
   # holds Immich's own library/thumbs/upload trees.
+  #
+  # mode: mirror since 2026-10-03 - the Phase 2 photo migration
+  # (project_immich_wrong_year_diagnosis) landed 59,150 new files here
+  # and is still mid-flight; this is the source whose unthrottled
+  # generational diff caused the 2026-09-18/21 incident in the first
+  # place.
   - name: photos
     path: /share/CACHEDEV1_DATA/photos
+    mode: mirror
+    # Only source big enough to have ever needed the mid-run throttle
+    # re-check - see roles/qnap_snapshot/HISTORY.md #4. Still relevant
+    # under mode: mirror, which can also run for hours.
+    long_running: true
   - name: vault
     path: /share/CACHEDEV1_DATA/vault
   - name: immich
@@ -71,8 +92,14 @@ qnap_snapshot_sources:
     path: /share/CACHEDEV1_DATA/paperless
   - name: inbox
     path: /share/CACHEDEV1_DATA/inbox
+  # mode: mirror since 2026-10-03 - the other source flagged as a
+  # "worst offender" in HISTORY.md #4, under constant write pressure
+  # from arr-stack's inbound downloads rather than a one-off migration,
+  # but the same moving-target problem for a generational diff.
   - name: media
     path: /share/CACHEDEV1_DATA/media
+    mode: mirror
+    long_running: true
     excludes:
       - downloads
   # Added 2026-08-13 - both previously lived under active_backup/ on

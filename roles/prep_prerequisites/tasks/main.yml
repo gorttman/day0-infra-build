@@ -11,6 +11,10 @@
   ansible.builtin.include_tasks:
     file: network.yml
 
+- name: Tune kernel sysctls for k3s node density
+  ansible.builtin.include_tasks:
+    file: sysctl.yml
+
 - name: Configure NTP
   ansible.builtin.include_tasks:
     file: timesyncd.yml

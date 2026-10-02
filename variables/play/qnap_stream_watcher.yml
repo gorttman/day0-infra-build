@@ -1,0 +1,25 @@
+################################################################################
+# FILE: variables/play/qnap_stream_watcher.yml
+################################################################################
+---
+# Added 2026-09-18 alongside qnap_snapshot's throttle changes - see
+# roles/qnap_snapshot/HISTORY.md #4. Polls Jellyfin's active-session
+# API and writes/removes qnap_snapshot_throttle_flag_file
+# (variables/play/qnap_snapshot.yml) accordingly; the snapshot script
+# only ever reads that file, this is the only writer.
+qnap_stream_watcher_script_path: /share/CACHEDEV1_DATA/.scripts/qnap-stream-watcher.sh
+qnap_stream_watcher_interval_minutes: 2
+
+# Traefik ingress, same host the TVs/browsers use (kubectl get ingress
+# -n jellyfin). Reachable from the QNAP over VLAN20 like any other LAN
+# client - split-horizon DNS resolves it internally.
+jellyfin_base_url: https://jellyfin.i3sec.com.au
+
+# Fetched live from the arr-stack-wiring-secret k8s Secret at apply
+# time (see the "QNAP stream-aware backup throttle" play in
+# qnap-manage.yml) - the same key jellyfin-notify already uses, not a
+# separately issued one. Deliberately not committed here even
+# base64'd; nothing in this repo currently vaults QNAP-pushed script
+# content, so treat the key as being written to the QNAP in plaintext,
+# same risk profile as every other raw-pushed script in this role
+# family.
