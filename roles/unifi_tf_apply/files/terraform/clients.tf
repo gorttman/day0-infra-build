@@ -148,11 +148,13 @@ resource "unifi_user" "phone_base_station" {
 }
 
 resource "unifi_user" "chromecast_pergola" {
-  mac             = "88:3d:24:5b:0a:4e"
-  name            = "Chromecast Pergola"
-  network_id      = unifi_network.default.id
-  dev_id_override = 39
-  blocked         = false
+  mac              = "88:3d:24:5b:0a:4e"
+  name             = "Chromecast Pergola"
+  fixed_ip         = "192.168.2.196" # reserved 2026-10-03: stable target for Home Assistant / Music Assistant Cast (was live use_fixedip: false, same address)
+  network_id       = unifi_network.default.id
+  dev_id_override  = 39
+  local_dns_record = "chromecast-pergola.i3sec.com.au"
+  blocked          = false
 }
 
 resource "unifi_user" "fetchbox_pantry" {
