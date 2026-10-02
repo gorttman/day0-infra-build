@@ -52,8 +52,11 @@
     # qnap_snapshot.yml supplies qnap_snapshot_script_path, referenced
     # by the qnap-data-snapshot cron entry below - each play has its
     # own isolated vars_files scope, so this has to be included here
-    # too, not just in the snapshot play itself.
+    # too, not just in the snapshot play itself. qnap_stream_watcher.yml
+    # supplies qnap_stream_watcher_script_path/_interval_minutes for
+    # the qnap-stream-watcher entry below, same reason.
     - variables/play/qnap_snapshot.yml
+    - variables/play/qnap_stream_watcher.yml
     - variables/play/qnap_backup_cron.yml
 
   tasks:
@@ -92,3 +95,39 @@
     - name: Ensure the snapshot script is pushed and current
       ansible.builtin.include_role:
         name: qnap_snapshot
+
+# Added 2026-09-18 - see roles/qnap_snapshot/HISTORY.md #4. Separate
+# play (not folded into "QNAP data snapshot script" above) because it
+# needs a task delegated to this control host's own kubectl access,
+# which none of the other qnap-targeted plays in this file need.
+- name: QNAP stream-aware backup throttle
+  hosts: qnap
+  gather_facts: false
+  tags:
+    - manage_qnap_stream_watcher
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/qnap_snapshot.yml
+    - variables/play/qnap_stream_watcher.yml
+
+  tasks:
+    - name: Fetch the Jellyfin API key already used by jellyfin-notify
+      # Reuses arr-stack-wiring-secret's jellyfin_api_key rather than
+      # issuing a new one - same key jellyfin-notify's CronJob already
+      # mounts (arr-stack namespace). kubectl needs sudo on this
+      # control host (confirmed live in-session, not a Python module
+      # since none of this file's other tasks depend on one either).
+      ansible.builtin.command:
+        cmd: >-
+          sudo kubectl get secret arr-stack-wiring-secret -n arr-stack
+          -o jsonpath={.data.jellyfin_api_key}
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      register: jellyfin_api_key_b64
+
+    - name: Push the stream-activity watcher script
+      ansible.builtin.include_role:
+        name: qnap_stream_watcher
+      vars:
+        jellyfin_api_key: "{{ jellyfin_api_key_b64.stdout | b64decode }}"
