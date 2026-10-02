@@ -109,7 +109,9 @@ resource "unifi_user" "googlehome_bar" {
 resource "unifi_user" "pinode_01" {
   mac              = "2c:cf:67:27:93:f2"
   name             = "pinode-01"
-  fixed_ip         = "192.168.2.11"
+  # fixed_ip 192.168.2.11 dropped 2026-10-03: this is the old main-LAN
+  # identity, unseen for 30 days. The node is pinode-m (…f1) on Trusted at
+  # 192.168.20.11 via static NetworkManager config, not a reservation.
   network_id       = unifi_network.default.id
   dev_id_override  = 4133
 }
@@ -117,7 +119,9 @@ resource "unifi_user" "pinode_01" {
 resource "unifi_user" "k8smaster" {
   mac             = "88:a2:9e:2e:af:a1"
   name            = "k8smaster"
-  fixed_ip        = "192.168.2.10"
+  # fixed_ip 192.168.2.10 dropped 2026-10-03: old main-LAN identity (the
+  # wlan0 NIC, down, unseen for 30 days). The node is k8smaster-m (…a0,
+  # end0) on Trusted at 192.168.20.10 via static NetworkManager config.
   network_id      = unifi_network.default.id
   dev_id_override = 4133
   # local_dns_record live is "" (empty) with local_dns_record_enabled
