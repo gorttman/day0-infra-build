@@ -67,13 +67,18 @@
 # this file, worth checking again if a "pin a client to its nearest AP"
 # approach to the roaming problem is ever revisited.
 
+# DNS names for these devices (googlehome-*, chromecast-pergola, pinode-01)
+# live in Pi-hole, NOT here: dns-conf/pihole/pihole-custom-dns-cm.yml, as
+# host-record lines (moved 2026-10-03; the UDM's local_dns_record was never
+# reachable because DHCP hands out only the Pi-holes). This file owns the
+# MAC->IP reservation; if a fixed_ip below changes, change the matching
+# host-record there in the same pass.
 resource "unifi_user" "googlehome_lounge" {
   mac              = "48:d6:d5:db:89:2e"
   name             = "googlehome lounge"
   fixed_ip         = "192.168.2.69"
   network_id       = unifi_network.default.id
   dev_id_override  = 2028
-  local_dns_record = "googlehome-lounge.i3sec.com.au"
 }
 
 resource "unifi_user" "googlehome_shed" {
@@ -82,7 +87,6 @@ resource "unifi_user" "googlehome_shed" {
   fixed_ip         = "192.168.2.40"
   network_id       = unifi_network.default.id
   dev_id_override  = 2028
-  local_dns_record = "googlehome-shed.i3sec.com.au"
 }
 
 resource "unifi_user" "googlehome_clock" {
@@ -90,7 +94,6 @@ resource "unifi_user" "googlehome_clock" {
   name             = "googlehome clock"
   fixed_ip         = "192.168.2.188"
   network_id       = unifi_network.default.id
-  local_dns_record = "googlehome-clock.i3sec.com.au"
   # no dev_id_override live for this one specifically - not every
   # googlehome entry has one set, confirmed via the raw record.
 }
@@ -101,7 +104,6 @@ resource "unifi_user" "googlehome_bar" {
   fixed_ip         = "192.168.2.197"
   network_id       = unifi_network.default.id
   dev_id_override  = 2028
-  local_dns_record = "googlehome-bar.i3sec.com.au"
 }
 
 resource "unifi_user" "pinode_01" {
@@ -110,7 +112,6 @@ resource "unifi_user" "pinode_01" {
   fixed_ip         = "192.168.2.11"
   network_id       = unifi_network.default.id
   dev_id_override  = 4133
-  local_dns_record = "pinode-01.i3sec.com.au"
 }
 
 resource "unifi_user" "k8smaster" {
@@ -153,7 +154,6 @@ resource "unifi_user" "chromecast_pergola" {
   fixed_ip         = "192.168.2.196" # reserved 2026-10-03: stable target for Home Assistant / Music Assistant Cast (was live use_fixedip: false, same address)
   network_id       = unifi_network.default.id
   dev_id_override  = 39
-  local_dns_record = "chromecast-pergola.i3sec.com.au"
   blocked          = false
 }
 
