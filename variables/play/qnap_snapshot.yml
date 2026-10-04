@@ -33,6 +33,13 @@ qnap_snapshot_throttle_bwlimit_kbps: 3000
 # they re-check the flag and restart with a new limit mid-run.
 qnap_snapshot_throttle_recheck_seconds: 120
 
+# Maximum hours one mirror-mode run may hold the snapshot lock before it
+# stops and lets the next source run (2026-10-05). Mirrors resume where they
+# left off. Photos starts 02:39 and media 02:59 and they run one after the
+# other, so two 7h runs end by about 16:00 - well clear of the 23:59 start
+# of the nightly sources. See roles/qnap_snapshot/HISTORY.md #8.
+qnap_snapshot_mirror_max_hours: 7
+
 # Source list finalized 2026-08-10 (see day2-services
 # project_qnap_backup_design memory for the full reasoning trail).
 # Deliberately excludes: /backup itself (it's the destination disk,
