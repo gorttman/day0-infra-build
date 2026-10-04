@@ -230,3 +230,17 @@ that day's generation same as a brand new source would - a deliberate
 simplification rather than extra complexity to chain the mirror
 directory in as the first baseline, since this is a one-time cost paid
 once per source, not a recurring one.
+
+## 7. Weekly/monthly promotion failed on every source (found 2026-10-04)
+
+Symptom: `qnap-snapshot.log` showed `rsync: mkdir ".../weekly/2026-W40/<source>"
+failed: No such file or directory` after each source's daily run. The daily
+tier was fine; the weekly tier had no data.
+
+Cause: the QNAP's rsync 3.0.7 has no `--mkpath`, and it creates only the last
+path component. The `weekly/<week>/` and `monthly/<month>/` parents did not
+exist, and the script never created them.
+
+Fix: `mkdir -p` the destination before each promotion rsync. Sources that
+missed their promotion on 2026-10-04 (before the fix) are not backfilled;
+the next Sunday promotes them.

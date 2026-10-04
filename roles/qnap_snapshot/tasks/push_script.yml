@@ -276,10 +276,12 @@
     if [ -n "$SRC_DAILY_DIR" ]; then
       if [ "$DOW" = "7" ]; then
         echo "[*] Promoting $MODE to weekly"
+        mkdir -p "$WEEKLY_DIR/$WEEK_TAG/$MODE"
         rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$WEEKLY_DIR/$WEEK_TAG/$MODE/"
       fi
       if [ "$DOM" = "01" ]; then
         echo "[*] Promoting $MODE to monthly"
+        mkdir -p "$MONTHLY_DIR/$MONTH_TAG/$MODE"
         rsync -a --link-dest="$SRC_DAILY_DIR" "$SRC_DAILY_DIR/" "$MONTHLY_DIR/$MONTH_TAG/$MODE/"
       fi
     fi
