@@ -244,3 +244,43 @@ exist, and the script never created them.
 Fix: `mkdir -p` the destination before each promotion rsync. Sources that
 missed their promotion on 2026-10-04 (before the fix) are not backfilled;
 the next Sunday promotes them.
+
+## 8. A multi-TB mirror run starves the nightly sources (found 2026-10-05)
+
+Symptom: the first photos mirror run started 02:44 and was still going at
+07:00 (259 of 708 GB). The media job, due 02:59, was alive but idle in the
+lock's 15-second retry loop. It retries forever.
+
+Cause: the script allows one source at a time (the lock exists because
+concurrent rsyncs ran the 1 GB QNAP out of memory). A mirror holds the lock
+for its whole run. Photos needs about 13 hours, media is multi-TB and needs
+days at the 20 MB/s cap. While a mirror holds the lock, the 23:59 nightly
+sources (books, vault, paperless, immich, inbox, pihole, calibre-web) wait
+behind it, and which waiting job wins the lock is random, not queue order.
+
+Fix:
+- Each mirror run stops after `qnap_snapshot_mirror_max_hours` (7). Checked
+  inside `run_rsync`'s wait loop, which already wakes every few minutes, so
+  no `timeout` binary is needed (BusyBox here has no flock/ionice/nice either).
+  The copy is additive, so the next night skips what is already copied. A
+  time-boxed stop exits 0 and logs "mirror paused at its time limit".
+- Mirror runs use `--partial-dir=.rsync-partial`, so a half-copied file is
+  kept and resumed, not left as a stray temp file and restarted. Tested.
+- The script is now pushed to `qnap-snapshot.sh.new` and `mv`'d into place.
+  The old `cat >` rewrote the file in place, and a running instance (a mirror
+  runs for hours) reads its script lazily, so it would have resumed in the
+  middle of a different file.
+
+Tested on the QNAP in a sandbox copy with its own lock, a scratch source and
+a 12-second limit: stopped on time, exit 0, partial kept, lock released, real
+lock untouched; a second run resumed and produced a byte-identical copy and
+removed the partial directory.
+
+Timing: photos starts 02:39, media 02:59, run in turn, two 7-hour runs end
+by about 16:00, clear of the 23:59 start. Both resume nightly until caught
+up, then flip back to generational mode (see #6).
+
+Deploy note: a run already waiting for the lock holds the OLD script. Kill
+it with `kill -9`, never plain `kill`: its EXIT trap runs `release_lock`,
+which does `rm -rf` on the lock directory, and that would free a lock held
+by a different, running job.
