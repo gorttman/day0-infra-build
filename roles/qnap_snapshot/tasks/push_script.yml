@@ -256,7 +256,7 @@
       # run and a waiting job retries forever, so an unbounded multi-TB mirror
       # starves the nightly generational sources (books, vault, paperless...)
       # behind it. Stop after N hours; the copy is additive, so the next
-      # night's run skips everything already copied. --partial-dir keeps a
+      # run on the next night skips everything already copied. --partial-dir keeps a
       # half-copied file in a side directory and resumes it, instead of
       # leaving a stray temp file and starting that file over.
       MIRROR_DEADLINE=$(( $(date +%s) + {{ qnap_snapshot_mirror_max_hours }} * 3600 ))
