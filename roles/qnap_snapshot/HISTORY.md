@@ -319,3 +319,18 @@ itself and syncs against W34. Expect the log line "books has no daily
 generation yet - flagging it for a full sync". After that, skipped nights
 leave the generation in place, and the Sunday promotion has something to
 promote (first real weekly promotion for every source: Sunday 2026-10-11).
+
+## 10. Mirror runs leave a last-run marker (2026-10-05)
+
+The reports backup page judged every source by its newest DAILY generation.
+A mirror-mode source (photos, media) has none by design, and the old photos
+generation from September (kept forever by the #9 prune protection) made the
+page show photos as 14 days stale and the QNAP stream critical permanently.
+
+Fix: each mirror run touches `mirror/<source>/.last-run` when it ends,
+whether it completed or stopped at its time limit. A run that fails never
+reaches that line, so a broken mirror still goes stale on the page. The page
+reads the marker (day2-services apps/reports, reports-backups-cm.yml).
+Sandbox-tested: marker created, real lock untouched. A mirror run always
+lasts at least one recheck interval (120 s) even for a tiny copy; that is the
+existing poll loop, not a fault.
