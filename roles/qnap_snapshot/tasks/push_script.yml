@@ -119,17 +119,35 @@
     }
 
     if [ "$MODE" = "--prune" ]; then
+      # Daily directories that must survive the prune: for each source, the
+      # newest daily directory that contains it. A flag-file source (books) is
+      # skipped on nights with no change, so it appears in only some daily
+      # directories, and pruning by directory count alone dropped its last
+      # generation (found 2026-10-05, HISTORY #9).
+      protected=" "
+      seen=" "
+      for pd in $(ls -1t "$DAILY_DIR" 2>/dev/null); do
+        for ps in $(ls -1 "$DAILY_DIR/$pd" 2>/dev/null); do
+          case "$seen" in
+            *" $ps "*) ;;
+            *) seen="$seen$ps "; protected="$protected$pd " ;;
+          esac
+        done
+      done
       prune_generations() {
-        dir="$1"; keep="$2"
+        dir="$1"; keep="$2"; hold="${3:- }"
         i=0
         for d in $(ls -1t "$dir" 2>/dev/null); do
           i=$((i + 1))
           if [ "$i" -gt "$keep" ]; then
-            rm -rf "${dir:?}/${d:?}"
+            case "$hold" in
+              *" $d "*) echo "[*] Prune keeps $dir/$d (newest generation of a source)" ;;
+              *) rm -rf "${dir:?}/${d:?}" ;;
+            esac
           fi
         done
       }
-      prune_generations "$DAILY_DIR" "$DAILY_KEEP"
+      prune_generations "$DAILY_DIR" "$DAILY_KEEP" "$protected"
       prune_generations "$WEEKLY_DIR" "$WEEKLY_KEEP"
       prune_generations "$MONTHLY_DIR" "$MONTHLY_KEEP"
       echo "[*] Prune complete: $(date)"
@@ -280,11 +298,30 @@
     PREV_DIR=$(ls -1dt "$DAILY_DIR"/*/ 2>/dev/null | grep -v "/${DATE}/\$" | head -1)
     mkdir -p "$TODAY_DIR"
 
+    # Baseline for hardlinks: this source own newest generation, looked up
+    # across daily first, then weekly and monthly - not just "the newest daily
+    # directory has it". A flag-file source can be missing from every recent
+    # daily directory, and the old lookup then copied the whole tree again.
+    BASE_GEN=$(ls -1dt "$DAILY_DIR"/*/$MODE 2>/dev/null | grep -v "/${DATE}/" | head -1)
+    if [ -z "$BASE_GEN" ]; then
+      BASE_GEN=$(ls -1dt "$WEEKLY_DIR"/*/$MODE "$MONTHLY_DIR"/*/$MODE 2>/dev/null | head -1)
+    fi
+    HAVE_DAILY=$(ls -d "$DAILY_DIR"/*/$MODE 2>/dev/null | head -1)
+
+    # A flag-file source with no daily generation at all is never backed up if
+    # the flag stays absent, so flag it. Setting the flag BEFORE the copy also
+    # means an interrupted run leaves it set and the next night retries, instead
+    # of a half-copied directory counting as a generation (HISTORY #9).
+    if [ -n "$FLAG" ] && [ ! -f "$SRC_PATH/$FLAG" ] && [ -z "$HAVE_DAILY" ]; then
+      echo "[*] $MODE has no daily generation yet - flagging it for a full sync (baseline: ${BASE_GEN:-none})"
+      touch "$SRC_PATH/$FLAG"
+    fi
+
     if [ -n "$FLAG" ]; then
       if [ -f "$SRC_PATH/$FLAG" ]; then
         echo "[*] Syncing $MODE (flagged pending)"
-        if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}${MODE}" ]; then
-          run_rsync "$TODAY_DIR/$MODE" --exclude="$FLAG" --link-dest="${PREV_DIR}${MODE}"
+        if [ -n "$BASE_GEN" ] && [ -d "$BASE_GEN" ]; then
+          run_rsync "$TODAY_DIR/$MODE" --exclude="$FLAG" --link-dest="$BASE_GEN"
         else
           run_rsync "$TODAY_DIR/$MODE" --exclude="$FLAG"
         fi
@@ -294,8 +331,8 @@
       fi
     else
       echo "[*] Syncing $MODE"
-      if [ -n "$PREV_DIR" ] && [ -d "${PREV_DIR}${MODE}" ]; then
-        run_rsync "$TODAY_DIR/$MODE" --link-dest="${PREV_DIR}${MODE}"
+      if [ -n "$BASE_GEN" ] && [ -d "$BASE_GEN" ]; then
+        run_rsync "$TODAY_DIR/$MODE" --link-dest="$BASE_GEN"
       else
         run_rsync "$TODAY_DIR/$MODE"
       fi
