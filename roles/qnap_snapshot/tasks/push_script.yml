@@ -281,6 +281,11 @@
       TIMEBOXED=0
       run_rsync "$SRC_MIRROR_DIR" --partial-dir=.rsync-partial
       drop_caches
+      # Marker the reports backup page reads to judge this mirror (it has no
+      # daily generations to date). Touched whether the run completed or was
+      # stopped at its time limit; a run that fails never reaches this line,
+      # so a mirror that stops working goes stale on the page.
+      touch "$SRC_MIRROR_DIR/.last-run"
       if [ "$TIMEBOXED" = "1" ]; then
         echo "[*] $MODE mirror paused at its time limit (not complete): $(date)"
       else
