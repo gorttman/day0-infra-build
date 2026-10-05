@@ -284,3 +284,38 @@ Deploy note: a run already waiting for the lock holds the OLD script. Kill
 it with `kill -9`, never plain `kill`: its EXIT trap runs `release_lock`,
 which does `rm -rf` on the lock directory, and that would free a lock held
 by a different, running job.
+
+## 9. books had no backup generation at all (found 2026-10-05)
+
+Symptom: no daily generation contained `books`; the newest books copy was in
+weekly W34 (late August); the Sunday weekly promotion for books logged
+nothing; the weekly tier had no W35 onward for books.
+
+Cause, three parts that together hid it:
+- `books` is a flag-file source: it syncs only when `.snapshot-pending`
+  exists. On a night with no change it is skipped and creates no `books`
+  directory in that day's daily generation.
+- Prune keeps the newest 7 daily DIRECTORIES regardless of contents. After a
+  week of skipped nights, the last directory that contained books aged out.
+- Weekly promotion copies "this source newest daily generation". With none,
+  `SRC_DAILY_DIR` is empty and the promotion silently does nothing. And the
+  flag stayed absent, so books was never synced again.
+Also, the rsync baseline was "the newest daily directory, if it has this
+source", so even when books did sync it copied the whole tree again.
+
+Fix (all tested in a sandbox on the QNAP with the rendered script):
+- Baseline for `--link-dest` is the source own newest generation across daily,
+  then weekly and monthly. First sync after the gap hardlinked unchanged files
+  against W34 and copied only changed and new files.
+- A flag-file source with no daily generation at all is flagged automatically,
+  and the flag is set BEFORE the copy, so an interrupted run retries the next
+  night (a half-copied directory cannot count as a generation).
+- Prune never deletes the newest daily directory that contains a given source.
+  Tested: books present only in the oldest of 10 directories survived a prune
+  with keep=7 while the surplus directories were removed.
+
+First effect: tonight 23:59 the books job finds no daily generation, flags
+itself and syncs against W34. Expect the log line "books has no daily
+generation yet - flagging it for a full sync". After that, skipped nights
+leave the generation in place, and the Sunday promotion has something to
+promote (first real weekly promotion for every source: Sunday 2026-10-11).
