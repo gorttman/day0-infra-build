@@ -334,3 +334,30 @@ reads the marker (day2-services apps/reports, reports-backups-cm.yml).
 Sandbox-tested: marker created, real lock untouched. A mirror run always
 lasts at least one recheck interval (120 s) even for a tiny copy; that is the
 existing poll loop, not a fault.
+
+## 11. Changed-only sources get a monthly floor (2026-10-11)
+
+`books` is copied only when the producer flags a change, so a quiet library
+could go months with no new generation and the report page showed it critical
+after 4 days even though nothing was wrong. Two changes: (1) the script now
+flags a flag-file source for a full sync when its newest daily generation is
+28+ days old, giving at least one backup a month; (2) the reports page labels
+each source Nightly / Mirror / Changed-only + monthly and judges the last type
+on a 31-day warn / 35-day critical scale. Logic sandbox-tested locally (6-day
+generation: not due; old generation: flagged). Deploy: `ansible-playbook
+qnap-manage.yml --tags manage_qnap_snapshot` (the push is a raw task, so
+--check skips it).
+
+## 12. Media mirror pause that resumes itself (2026-10-11)
+
+The media mirror was paused (its cron line commented with a "#PAUSED" prefix)
+so a 112 GB move off the backup disk was not fighting it for the USB disk. A
+pause that someone has to remember to undo is how things stay off, so
+`files/media-mirror-resume.sh` runs every 15 minutes from cron and restores the
+line by itself once the folders being moved are gone, or after 72 hours
+whichever comes first. Doing nothing when not paused, it is safe to leave
+installed. Also found: the mirror script's cleanup (release_lock) kills any
+rsync whose command line contains the mirror source path, which includes
+unrelated copies INTO media/ - stopping the mirror killed a woodworking copy
+mid-file (source untouched, rerun resumed). Do not run other rsyncs into media/
+while a media mirror stops.

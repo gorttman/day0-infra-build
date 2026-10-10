@@ -322,6 +322,19 @@
       touch "$SRC_PATH/$FLAG"
     fi
 
+    # A flag-file source is only copied when something changed, so a quiet
+    # library could go months without a fresh generation. Force a full sync
+    # when its newest daily generation is 28+ days old: the floor is one
+    # backup a month whether or not anything changed (2026-10-11).
+    if [ -n "$FLAG" ] && [ ! -f "$SRC_PATH/$FLAG" ] && [ -n "$HAVE_DAILY" ]; then
+      NEWEST_GEN_DATE=$(basename "$(dirname "$(ls -1dt "$DAILY_DIR"/*/$MODE 2>/dev/null | head -1)")")
+      NEWEST_GEN_EPOCH=$(date -d "$NEWEST_GEN_DATE" +%s 2>/dev/null || echo 0)
+      if [ "$NEWEST_GEN_EPOCH" -gt 0 ] && [ $(( $(date +%s) - NEWEST_GEN_EPOCH )) -ge 2419200 ]; then
+        echo "[*] $MODE newest generation is $NEWEST_GEN_DATE (28+ days) - flagging it for the monthly sync"
+        touch "$SRC_PATH/$FLAG"
+      fi
+    fi
+
     if [ -n "$FLAG" ]; then
       if [ -f "$SRC_PATH/$FLAG" ]; then
         echo "[*] Syncing $MODE (flagged pending)"

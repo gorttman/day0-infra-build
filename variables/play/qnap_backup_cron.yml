@@ -71,6 +71,13 @@ qnap_cron_jobs:
   - name: qnap-data-snapshot-media-v2
     schedule: "59 2 * * *"
     command: "{{ qnap_snapshot_script_path }} media >> {{ qnap_snapshot_log_file }} 2>&1"
+  # Added 2026-10-11. Self-resuming pause for the media mirror: does nothing
+  # unless the media entry is commented out with a "#PAUSED" prefix, then puts
+  # it back once the folders being moved off the backup disk are gone (or
+  # after 72 h). Script: roles/qnap_snapshot/files/media-mirror-resume.sh.
+  - name: qnap-media-mirror-resume
+    schedule: "*/15 * * * *"
+    command: "/share/CACHEDEV1_DATA/.scripts/media-mirror-resume.sh"
   # Added 2026-09-18 alongside qnap_snapshot's throttle changes - see
   # roles/qnap_snapshot/HISTORY.md #4/#5 and variables/play/
   # qnap_stream_watcher.yml. Every 2 min rather than something coarser
