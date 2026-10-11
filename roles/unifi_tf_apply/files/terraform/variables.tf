@@ -35,3 +35,9 @@ variable "wlan_arda_home_passphrase" {
   type        = string
   sensitive   = true
 }
+
+variable "wlan_iot_passphrase" {
+  description = "WPA pre-shared key for the hidden IoT WLAN (wlan.tf), injected as TF_VAR_wlan_iot_passphrase from the unifi-tf-secrets SealedSecret. Generated randomly 2026-10-12; read it back with: sudo kubectl -n infra get secret unifi-tf-secrets -o jsonpath='{.data.TF_VAR_wlan_iot_passphrase}' | base64 -d"
+  type        = string
+  sensitive   = true
+}

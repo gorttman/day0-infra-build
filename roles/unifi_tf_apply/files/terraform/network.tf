@@ -263,11 +263,17 @@ resource "unifi_network" "iot" {
   multicast_dns = false
 
   dhcp_enabled = true
-  dhcp_start   = "192.168.40.6"
+  # Address plan for this VLAN (static space is .1-.50, DHCP pool is .51+):
+  #   .1        gateway
+  #   .10-.19   cluster-node legs (same last octets as Trusted, room for ~5 Pis)
+  #   .21-.50   reserved sound / HID devices (UniFi fixed IPs in clients.tf)
+  # See the music-assistant / Bose network ADR.
+  dhcp_start   = "192.168.40.51"
   dhcp_stop    = "192.168.40.239"
-  # Both Pi-hole VIPs, no public fallback - same list as Default, see the
-  # full rationale in the Default resource above.
-  dhcp_dns     = ["192.168.20.245", "192.168.20.246"]
+  # dhcp_dns deliberately NOT set (2026-10-12): IoT clients use the gateway
+  # (192.168.40.1) as resolver, so nothing on this VLAN needs to reach the
+  # Pi-hole VIPs on Trusted and the IoT<->Trusted block needs no DNS
+  # exception. No split-horizon names are needed by IoT devices.
 
   igmp_snooping         = false
   dhcp_guarding         = false

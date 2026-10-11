@@ -62,3 +62,32 @@ import {
   # never-merged draft imported against (607fbf602d387c04fa8ff624).
   id = "6a73a3de7eae7c6ea8d8b462"
 }
+
+# --- IoT WLAN (2026-10-12): hidden SSID bound to the IoT VLAN (40) ---
+# First device is the Bose Soundbar 900 pilot (see the Bose/IoT network ADR).
+# Hidden on request. Caveat, untested: some devices/setup apps cannot join a
+# hidden SSID - if the Bose app can't, set hide_ssid = false for the pilot.
+# WPA2-PSK only (no WPA3, no PMF) for the widest IoT-device compatibility;
+# fast roaming and multicast enhancement off (they upset cheap IoT stacks).
+resource "unifi_wlan" "arda_iot" {
+  name          = "ARDA_IOT"
+  security      = "wpapsk"
+  passphrase    = var.wlan_iot_passphrase
+  user_group_id = "5dcadb092d387c04fa8ff617" # built-in "Default" user group
+  network_id    = unifi_network.iot.id
+  ap_group_ids  = ["607fc0bdafaf570510a1e61a"] # the single "All APs" group
+  wlan_bands    = ["2g", "5g"]
+
+  hide_ssid          = true
+  is_guest           = false
+  mac_filter_enabled = false
+  wpa3_support       = false
+  wpa3_transition    = false
+
+  fast_roaming_enabled = false
+  multicast_enhance    = false
+  no2ghz_oui           = false # do not push "high-performance" vendors off 2.4 GHz
+
+  minimum_data_rate_2g_kbps = 0
+  minimum_data_rate_5g_kbps = 0
+}
