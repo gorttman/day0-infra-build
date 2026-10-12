@@ -15,3 +15,5 @@ node_iot_leg:
 # NetworkManager profile that carries the node's own (Trusted) address. Its
 # DNS list is reconciled to wifi_mgmt_dns. Empty = leave DNS alone.
 node_primary_conn: ""
+# The NIC that profile is bound to (eth0 on pinode-01, end0 on k8smaster).
+node_primary_ifname: ""

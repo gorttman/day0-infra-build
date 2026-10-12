@@ -1,5 +1,6 @@
 ---
 node_primary_conn: backend-vlan
+node_primary_ifname: end0
 # Leg is declared but OFF: pinode-01 is the proven pilot; turn this on (and
 # review the sshd/firewall steps) when the k8smaster leg is done.
 node_iot_leg:

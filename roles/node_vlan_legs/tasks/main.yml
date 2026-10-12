@@ -8,32 +8,26 @@
   when: node_primary_conn | length > 0
   become: true
   block:
-    - name: Read the current DNS list on the primary connection
-      ansible.builtin.command: nmcli -g ipv4.dns connection show "{{ node_primary_conn }}"
-      register: node_dns_now
-      changed_when: false
-      check_mode: false
-
-    # ansible.builtin.command is skipped outright in check mode, which would
-    # make a dry run blind to resolver drift. This no-op reports it instead.
-    - name: Report resolver-list drift (so --check shows it)
-      ansible.builtin.command: "true"
-      check_mode: false
-      when: node_dns_now.stdout != (wifi_mgmt_dns | join(','))
-      changed_when: true
-
+    # Same module and parameters prep_prerequisites uses for DNS. Only the
+    # properties named here are compared/changed (checked with --check --diff
+    # against both live nodes: the address, gateway and method are untouched).
     - name: Set the resolver list (Pi-hole A, Pi-hole B, then the last-resort fallback)
-      ansible.builtin.command: >-
-        nmcli connection modify "{{ node_primary_conn }}"
-        ipv4.dns "{{ wifi_mgmt_dns | join(',') }}" ipv4.ignore-auto-dns yes
-      when: node_dns_now.stdout != (wifi_mgmt_dns | join(','))
-      register: node_dns_set
+      community.general.nmcli:
+        conn_name: "{{ node_primary_conn }}"
+        ifname: "{{ node_primary_ifname }}"
+        type: ethernet
+        dns4: "{{ wifi_mgmt_dns }}"
+        dns4_ignore_auto: true
+        state: present
+      register: node_dns
 
-    - name: Reapply without bouncing the link
-      ansible.builtin.command: "nmcli device reapply {{ node_primary_device }}"
-      when: node_dns_set is changed
-      vars:
-        node_primary_device: "{{ ansible_default_ipv4.interface | default(node_iot_leg.parent) }}"
+    # No module activates a profile; this is the one place a command is
+    # needed (prep_prerequisites does the same). Reapply, not 'up', so the
+    # link is never bounced.
+    - name: Apply the new resolver list to the live link without bouncing it
+      ansible.builtin.command: "nmcli device reapply {{ node_primary_ifname }}"
+      when: node_dns is changed
+      changed_when: true
 
 - name: IoT VLAN leg
   when: node_iot_leg.enabled | bool
