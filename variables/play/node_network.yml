@@ -17,3 +17,14 @@ node_iot_guard:
   allow_ephemeral_from_iot: true
   # Rate-limited log of what is being dropped (journalctl -k | grep iot-guard)
   log_drops: true
+
+# Options for roles/node_systemd_hygiene (the per-host switch is
+# node_hygiene_enabled in variables/cli/host_vars/<host>.yml).
+node_hygiene:
+  # Raspberry Pi first-boot dialog; hangs on /dev/tty8 and blocks multi-user.target
+  remove_userconf: true
+  # NetworkManager owns the network; networkd only fails (no .network files)
+  mask_networkd: true
+  # no datasource here: the stages hang (pinode-01) or fail (k8smaster)
+  disable_cloud_init: true
+  wait_for_running: true

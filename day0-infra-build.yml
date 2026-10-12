@@ -28,6 +28,10 @@
       ansible.builtin.include_role:
         name: node_vlan_legs
 
+    - name: Clean up stuck first-boot and network leftovers
+      ansible.builtin.include_role:
+        name: node_systemd_hygiene
+
     - name: Install all required software
       ansible.builtin.include_role:
         name: install_required_software

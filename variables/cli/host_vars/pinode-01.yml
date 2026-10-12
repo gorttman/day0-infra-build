@@ -12,3 +12,6 @@ node_iot_leg:
 node_ssh_listen_address: 192.168.20.11
 # host firewall table guarding the IoT leg
 node_iot_guard_enabled: true
+
+# systemd hygiene (roles/node_systemd_hygiene): first-boot dialog, networkd, cloud-init
+node_hygiene_enabled: true

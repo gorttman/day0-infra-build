@@ -25,3 +25,17 @@
     - name: Run the node_vlan_legs role
       ansible.builtin.include_role:
         name: node_vlan_legs
+
+# Separate play so it can run alone: --tags node_systemd_hygiene
+- name: Clean up stuck first-boot and network leftovers
+  hosts: k8smaster:workers
+  gather_facts: true
+  tags:
+    - node_systemd_hygiene
+  vars_files:
+    - variables/play/node_network.yml
+
+  tasks:
+    - name: Run the node_systemd_hygiene role
+      ansible.builtin.include_role:
+        name: node_systemd_hygiene
