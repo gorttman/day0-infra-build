@@ -20,8 +20,15 @@ Also runs as a step in `day0-infra-build.yml` (no-op where not opted in).
 
 Does NOT touch `prep_prerequisites`' `backend-vlan` task, which still carries the
 pre-VLAN20 `backend_vlan_ip` (192.168.1.10/27) and must not be run on k8smaster
-until reconciled. Note: plain `command` tasks are skipped in check mode, hence
-the explicit drift-report task.
+until reconciled.
+
+Uses `community.general.nmcli` for all configuration, so check mode and `--diff`
+work and only the named properties are compared. The only `command` calls are
+the two activations no module offers (`nmcli device reapply`,
+`nmcli connection up`), each run only when the module reported a change.
+First `--check --diff` against k8smaster showed real drift: `ipv4.ignore-auto-dns`
+is `no` live vs `yes` in code (harmless on a static profile; fixed on its next
+real run).
 
 Not yet covered here (planned, pinode-01 first): sshd `ListenAddress` limited to
 the Trusted address, and the host firewall table guarding the VLAN 40 leg.
