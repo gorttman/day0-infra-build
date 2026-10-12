@@ -1,5 +1,6 @@
 ---
 - name: Restart the IoT-leg guard
+  become: true
   ansible.builtin.systemd:
     name: iot-guard.service
     state: restarted

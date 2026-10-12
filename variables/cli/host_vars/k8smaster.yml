@@ -1,19 +1,20 @@
 ---
-node_primary_conn: backend-vlan
+# Left empty on purpose: backend-vlan is a netplan-generated profile
+# (/etc/netplan/90-NM-7ca054b9-*.yaml) whose resolver list is already correct
+# there; rewriting it from nmcli would fight netplan for no gain.
+node_primary_conn: ""
 node_primary_ifname: end0
-# Leg is declared but OFF: pinode-01 is the proven pilot; turn this on (and
-# review the sshd/firewall steps) when the k8smaster leg is done.
+# pinode-01 was the pilot (leg, sshd, guard cold-boot proven 2026-10-12).
 node_iot_leg:
-  enabled: false
+  enabled: true
   conn_name: iot40
   vlan_id: 40
   parent: end0
   address: 192.168.40.10/24
 # sshd socket bound to the Trusted address only ("" = leave sshd alone)
-node_ssh_listen_address: ""
-# k8smaster: 192.168.20.10 - OFF until its leg and the pinode-01 pilot are proven
+node_ssh_listen_address: 192.168.20.10
 # host firewall table guarding the IoT leg
-node_iot_guard_enabled: false
+node_iot_guard_enabled: true
 
 # systemd hygiene (roles/node_systemd_hygiene): first-boot dialog, networkd, cloud-init
 node_hygiene_enabled: true
