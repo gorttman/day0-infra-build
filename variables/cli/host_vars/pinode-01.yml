@@ -1,0 +1,9 @@
+---
+# NetworkManager's stock profile name on this node (the Pi OS default).
+node_primary_conn: "Wired connection 1"
+node_iot_leg:
+  enabled: true
+  conn_name: iot40
+  vlan_id: 40
+  parent: eth0
+  address: 192.168.40.11/24

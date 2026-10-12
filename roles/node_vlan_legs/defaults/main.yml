@@ -1,0 +1,17 @@
+---
+# Per-host values live in variables/cli/host_vars/<host>.yml. The DNS list is
+# wifi_mgmt_dns from variables/play/day0_bootstrap.yml (misnamed, but it is
+# the single authoritative node resolver list - see the comment there).
+#
+# node_iot_leg: tagged sub-interface onto the IoT VLAN (40), so Music
+# Assistant (hostNetwork) can share a subnet with the Bose / Sendspin nodes
+# wherever the pod lands. Disabled by default; a host opts in.
+node_iot_leg:
+  enabled: false
+  conn_name: iot40
+  vlan_id: 40
+  parent: ""      # e.g. eth0 (pinode-01) / end0 (k8smaster)
+  address: ""     # e.g. 192.168.40.11/24 - .10-.19 is the node block
+# NetworkManager profile that carries the node's own (Trusted) address. Its
+# DNS list is reconciled to wifi_mgmt_dns. Empty = leave DNS alone.
+node_primary_conn: ""

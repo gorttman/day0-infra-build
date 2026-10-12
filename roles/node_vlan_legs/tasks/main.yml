@@ -1,0 +1,66 @@
+---
+# Written 2026-10-12 for the Bose / IoT VLAN pilot. Deliberately separate from
+# prep_prerequisites' backend-vlan task: that one still carries the pre-VLAN20
+# address (backend_vlan_ip 192.168.1.10/27) and must NOT be run until it is
+# reconciled. Nothing here touches the node's primary address or routes.
+
+- name: Reconcile the node's own resolver list on its primary connection
+  when: node_primary_conn | length > 0
+  become: true
+  block:
+    - name: Read the current DNS list on the primary connection
+      ansible.builtin.command: nmcli -g ipv4.dns connection show "{{ node_primary_conn }}"
+      register: node_dns_now
+      changed_when: false
+      check_mode: false
+
+    # ansible.builtin.command is skipped outright in check mode, which would
+    # make a dry run blind to resolver drift. This no-op reports it instead.
+    - name: Report resolver-list drift (so --check shows it)
+      ansible.builtin.command: "true"
+      check_mode: false
+      when: node_dns_now.stdout != (wifi_mgmt_dns | join(','))
+      changed_when: true
+
+    - name: Set the resolver list (Pi-hole A, Pi-hole B, then the last-resort fallback)
+      ansible.builtin.command: >-
+        nmcli connection modify "{{ node_primary_conn }}"
+        ipv4.dns "{{ wifi_mgmt_dns | join(',') }}" ipv4.ignore-auto-dns yes
+      when: node_dns_now.stdout != (wifi_mgmt_dns | join(','))
+      register: node_dns_set
+
+    - name: Reapply without bouncing the link
+      ansible.builtin.command: "nmcli device reapply {{ node_primary_device }}"
+      when: node_dns_set is changed
+      vars:
+        node_primary_device: "{{ ansible_default_ipv4.interface | default(node_iot_leg.parent) }}"
+
+- name: IoT VLAN leg
+  when: node_iot_leg.enabled | bool
+  become: true
+  block:
+    - name: Check the leg is fully specified
+      ansible.builtin.assert:
+        that:
+          - node_iot_leg.parent | length > 0
+          - node_iot_leg.address | length > 0
+        quiet: true
+
+    - name: Tagged VLAN sub-interface on the parent NIC (no gateway, no default route)
+      community.general.nmcli:
+        conn_name: "{{ node_iot_leg.conn_name }}"
+        type: vlan
+        vlandev: "{{ node_iot_leg.parent }}"
+        vlanid: "{{ node_iot_leg.vlan_id }}"
+        ifname: "{{ node_iot_leg.parent }}.{{ node_iot_leg.vlan_id }}"
+        method4: manual
+        ip4: "{{ node_iot_leg.address }}"
+        never_default4: true
+        method6: disabled
+        autoconnect: true
+        state: present
+      register: node_leg
+
+    - name: Bring the leg up when it was just created or changed
+      ansible.builtin.command: "nmcli connection up {{ node_iot_leg.conn_name }}"
+      when: node_leg is changed

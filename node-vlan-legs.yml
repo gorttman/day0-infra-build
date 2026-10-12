@@ -1,0 +1,26 @@
+################################################################################
+# FILE: node-vlan-legs.yml
+################################################################################
+# Per-node network pieces that keep Music Assistant (hostNetwork) able to share
+# a subnet with the Bose and future Sendspin nodes wherever the pod lands:
+#   - a tagged IoT VLAN (40) sub-interface, per variables/cli/host_vars/*.yml
+#   - the node's own resolver list reconciled to wifi_mgmt_dns
+# Separate from day0-infra-build.yml on purpose: that play's backend-vlan task
+# still has the pre-VLAN20 address and must not be run until reconciled.
+#
+# Run with:
+#   ansible-playbook node-vlan-legs.yml --check --diff     # what would change
+#   ansible-playbook node-vlan-legs.yml --limit pinode-01  # apply to one node
+
+- name: Reconcile node IoT-VLAN legs and resolver lists
+  hosts: k8smaster:workers
+  gather_facts: true
+  tags:
+    - node_vlan_legs
+  vars_files:
+    - variables/play/day0_bootstrap.yml
+
+  tasks:
+    - name: Run the node_vlan_legs role
+      ansible.builtin.include_role:
+        name: node_vlan_legs
