@@ -8,3 +8,7 @@ node_iot_leg:
   vlan_id: 40
   parent: eth0
   address: 192.168.40.11/24
+# sshd socket bound to the Trusted address only ("" = leave sshd alone)
+node_ssh_listen_address: 192.168.20.11
+# host firewall table guarding the IoT leg
+node_iot_guard_enabled: true

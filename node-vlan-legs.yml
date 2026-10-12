@@ -19,6 +19,7 @@
     - node_vlan_legs
   vars_files:
     - variables/play/day0_bootstrap.yml
+    - variables/play/node_network.yml
 
   tasks:
     - name: Run the node_vlan_legs role

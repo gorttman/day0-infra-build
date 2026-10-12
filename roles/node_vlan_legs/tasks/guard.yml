@@ -1,0 +1,43 @@
+---
+- name: Check the guard has a leg to guard
+  ansible.builtin.assert:
+    that:
+      - node_iot_leg.enabled | bool
+    fail_msg: node_iot_guard_enabled needs node_iot_leg.enabled
+    quiet: true
+
+- name: Directory for the guard rules
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    mode: "0755"
+
+- name: Guard rules for the IoT leg (syntax-checked before they replace the file)
+  ansible.builtin.template:
+    src: iot-guard.nft.j2
+    dest: /etc/nftables.d/iot-guard.nft
+    mode: "0644"
+    validate: /usr/sbin/nft -c -f %s
+  vars:
+    node_guard_iface: "{{ node_iot_leg.parent }}.{{ node_iot_leg.vlan_id }}"
+  notify: Restart the IoT-leg guard
+
+- name: systemd unit that loads the guard
+  ansible.builtin.template:
+    src: iot-guard.service.j2
+    dest: /etc/systemd/system/iot-guard.service
+    mode: "0644"
+  vars:
+    node_guard_iface: "{{ node_iot_leg.parent }}.{{ node_iot_leg.vlan_id }}"
+  notify: Restart the IoT-leg guard
+
+- name: Enable the guard at boot (and start it)
+  ansible.builtin.systemd:
+    name: iot-guard.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  register: node_guard_enable
+  retries: 3
+  delay: 5
+  until: node_guard_enable is succeeded

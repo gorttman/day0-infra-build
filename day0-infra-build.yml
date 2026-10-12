@@ -5,6 +5,7 @@
   vars_files:
     - variables/common/set_environment.yml
     - variables/play/day0_bootstrap.yml
+    - variables/play/node_network.yml
 
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed

@@ -1,0 +1,10 @@
+---
+- name: Restart the IoT-leg guard
+  ansible.builtin.systemd:
+    name: iot-guard.service
+    state: restarted
+    daemon_reload: true
+  register: node_guard_restart
+  retries: 3
+  delay: 5
+  until: node_guard_restart is succeeded

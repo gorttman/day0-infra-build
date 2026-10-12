@@ -1,0 +1,71 @@
+---
+# sshd on Debian 13 is socket-activated (ssh.socket), so sshd_config's
+# ListenAddress is ignored - the socket unit is what must change. Order
+# matters: systemd REFUSES to (re)start ssh.socket while ssh.service is
+# running ("Socket service ssh.service already active, refusing"), so the
+# service is stopped first (KillMode=process: open sessions, including this
+# play's, survive) and sshd is re-launched by the socket on the next connect.
+- name: Drop-in directory for the ssh socket
+  ansible.builtin.file:
+    path: /etc/systemd/system/ssh.socket.d
+    state: directory
+    mode: "0755"
+
+# ListenStream= (empty) clears the stock "22" (all addresses). FreeBind lets
+# the socket bind this address before the NIC has it at boot, so a slow link
+# can never leave the node with no sshd (Debian's unit has
+# RestartPreventExitStatus=255, i.e. a failed bind is never retried).
+- name: Bind the ssh socket to the Trusted address only
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ssh.socket.d/10-listen-trusted.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/node_vlan_legs)
+      [Socket]
+      ListenStream=
+      ListenStream={{ node_ssh_listen_address }}:22
+      FreeBind=true
+  register: node_ssh_dropin
+
+- name: Rebind the socket (with rollback if it does not come up)
+  when: node_ssh_dropin is changed
+  block:
+    - name: Stop sshd (sessions survive; the socket re-launches it)
+      ansible.builtin.systemd:
+        name: ssh.service
+        state: stopped
+      register: node_ssh_stop
+      retries: 3
+      delay: 5
+      until: node_ssh_stop is succeeded
+
+    - name: Restart the socket on the Trusted address
+      ansible.builtin.systemd:
+        name: ssh.socket
+        state: restarted
+        daemon_reload: true
+      register: node_ssh_restart
+      retries: 3
+      delay: 5
+      until: node_ssh_restart is succeeded
+
+    - name: Confirm sshd answers on that address
+      ansible.builtin.wait_for:
+        host: "{{ node_ssh_listen_address }}"
+        port: 22
+        timeout: 20
+  rescue:
+    - name: Roll back - remove the drop-in
+      ansible.builtin.file:
+        path: /etc/systemd/system/ssh.socket.d/10-listen-trusted.conf
+        state: absent
+
+    - name: Roll back - put the socket back on all addresses
+      ansible.builtin.systemd:
+        name: ssh.socket
+        state: restarted
+        daemon_reload: true
+
+    - name: Report the rollback
+      ansible.builtin.fail:
+        msg: ssh.socket did not come up on {{ node_ssh_listen_address }}; rolled back to all addresses

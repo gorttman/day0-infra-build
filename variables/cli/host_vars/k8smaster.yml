@@ -9,3 +9,8 @@ node_iot_leg:
   vlan_id: 40
   parent: end0
   address: 192.168.40.10/24
+# sshd socket bound to the Trusted address only ("" = leave sshd alone)
+node_ssh_listen_address: ""
+# k8smaster: 192.168.20.10 - OFF until its leg and the pinode-01 pilot are proven
+# host firewall table guarding the IoT leg
+node_iot_guard_enabled: false

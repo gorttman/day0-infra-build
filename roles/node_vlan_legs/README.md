@@ -30,5 +30,41 @@ First `--check --diff` against k8smaster showed real drift: `ipv4.ignore-auto-dn
 is `no` live vs `yes` in code (harmless on a static profile; fixed on its next
 real run).
 
-Not yet covered here (planned, pinode-01 first): sshd `ListenAddress` limited to
-the Trusted address, and the host firewall table guarding the VLAN 40 leg.
+## sshd restricted to the Trusted address (`node_ssh_listen_address`)
+
+sshd on Debian 13 is **socket-activated**, so `ListenAddress` in `sshd_config`
+is ignored; the role drops `/etc/systemd/system/ssh.socket.d/10-listen-trusted.conf`
+(`ListenStream=<addr>:22`, `FreeBind=true`). `FreeBind` lets the socket bind
+before the NIC has the address at boot (Debian's unit has
+`RestartPreventExitStatus=255`, so a failed bind would never retry). Rebinding
+must **stop ssh.service first**: systemd refuses to restart a socket whose
+service is running. Sessions survive (`KillMode=process`). The tasks sit in a
+block that rolls back to all addresses if the socket does not come up.
+When changing this by hand, arm an independent watchdog first
+(`systemd-run --on-active=420 ...` that removes the drop-in and restarts the
+socket) and keep a second session open. Cold-boot behaviour has not been
+reboot-tested; `FreeBind` was proven on an address the node does not own.
+
+## Host firewall for the leg (`node_iot_guard_enabled`)
+
+`iot-guard.service` loads its own nft table (`inet iot_guard`) from
+`/etc/nftables.d/iot-guard.nft`. One hook rule jumps only for traffic entering
+on `eth0.40`; everything else is untouched. It is a separate unit because the
+stock `/etc/nftables.conf` starts with `flush ruleset` (which would wipe the
+kube/MetalLB tables); the unit is ordered after, and `PartOf`, `nftables.service`
+so a reload re-adds it. Allow-list (variables/play/node_network.yml): ICMP,
+IGMP, established/related, TCP 8097/8927, UDP 5353, and high ports 32768-60999
+from the IoT subnet only; drops are rate-limit logged (`iot-guard drop`).
+Tested on pinode-01: via the leg, 8097 open, an unlisted port with a live
+listener blocked, SSH and kubelet blocked; the same ports on the Trusted address
+unaffected; outbound to the Bose still works. The allow-list is a first guess for
+AirPlay 2 / Sendspin; tune from the drop log once Music Assistant runs on a
+node with the leg.
+
+## Known systemd oddities on pinode-01
+
+systemd there has been stuck in `starting` for 13+ days (the Raspberry Pi
+first-boot `userconfig.service` never finishes, so `multi-user.target` and
+`cloud-init.target` stay `start waiting`). Two D-Bus calls (`stop ssh.service`,
+`daemon-reload`) have timed out once each; ~20 others were fine. Cause not
+established, so the systemd tasks here retry 3 times.
