@@ -78,6 +78,21 @@ resource "unifi_device" "switch_picluster" {
   }
 
   port_override {
+    number                = 6
+    name                  = "Port 6"
+    forward                = "customize"
+    # pinode-02. The old Pi 5 board (wired MAC 2c:cf:67:27:93:f1) that was
+    # pinode-01 until 2026-10-14, when pinode-01's NVMe moved to a new Pi 5.
+    # It carried no override and fell back to the switch default (Default
+    # network untagged), which cut off its Trusted leg (192.168.20.12).
+    # Same as ports 7 and 8: Trusted (VLAN20) native.
+    native_networkconf_id = unifi_network.trusted.id
+    tagged_vlan_mgmt      = "auto"
+    poe_mode               = "auto"
+    setting_preference     = "manual"
+  }
+
+  port_override {
     number                = 7
     name                  = "Port 7"
     forward                = "customize"

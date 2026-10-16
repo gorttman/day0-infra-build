@@ -277,10 +277,14 @@ resource "unifi_user" "k8smaster_m" {
   blocked         = false
 }
 
+# 2026-10-15: this board (wired MAC …f1) was pinode-01 until 2026-10-14, when
+# pinode-01's NVMe moved to a new Pi 5. It is now pinode-02 at 192.168.20.12
+# on Trusted (switch port 6). The resource label stays pinode_m so the
+# rename is an in-place update, not a destroy and create.
 resource "unifi_user" "pinode_m" {
   mac             = "2c:cf:67:27:93:f1"
-  name            = "pinode-m"
-  network_id      = unifi_network.cluster_backend.id
+  name            = "pinode-02"
+  network_id      = unifi_network.trusted.id
   dev_id_override = 4133
   blocked         = false
 }
