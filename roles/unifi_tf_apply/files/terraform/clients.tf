@@ -289,6 +289,19 @@ resource "unifi_user" "pinode_m" {
   blocked         = false
 }
 
+# 2026-10-14: pinode-01's NVMe was moved into a new Pi 5 (16 GB). Same OS
+# disk, same static 192.168.20.11 (NetworkManager, not a reservation), new
+# board, so a new wired MAC (eth0, read live from the node). The old Pi 5
+# (2c:cf:67:27:93:f1 above) is being reused as a separate light worker.
+# Declared on Trusted, which is where the interface really sits.
+resource "unifi_user" "pinode_01_pi5_16gb" {
+  mac             = "98:fe:54:5f:bd:54"
+  name            = "pinode-01"
+  network_id      = unifi_network.trusted.id
+  dev_id_override = 4133
+  blocked         = false
+}
+
 # The remaining 10 don't have an explicit `name` set live, but DO have
 # a `hostname` (the device's own self-reported name - "iPad",
 # "Bretts-MBP", "DESKTOP-AEE4EIF", etc.) - that's what the UniFi UI
