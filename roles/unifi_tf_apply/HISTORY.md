@@ -716,3 +716,82 @@ the *scope* of what's relying on that mechanism working during a
 works. Bigger blast radius, same underlying safety net - a genuinely
 different risk calculus than the original "just NFS for a couple of
 PVCs" assessment, worth deciding with this full picture in view.
+
+## 19. `Switch-MainNet` canary: real evidence that a UniFi switch doesn't bounce ports on a no-op provision (2026-08-05)
+
+Before deciding `Switch-PiCluster`, ran the exact same
+canary-then-decide methodology already proven on `uap_shed` - but on a
+**switch** this time, since every real apply so far had only tested
+AP reprovision behavior. `Switch-MainNet` was picked deliberately: same
+hardware model as `Switch-PiCluster` (`US 8 PoE 150W`), so its behavior
+is a genuine predictor, and its `device.tf` block has no
+`port_override` (same shape as the 5 already-applied APs), so nothing
+about port/VLAN config could change - only the provision event itself
+was under test.
+
+**Real topology check first, not assumed**: pulled live port-level
+uplink data (`stat/device`'s `uplink` object) rather than trusting the
+Integration API's `uplink` field (which came back `None` for
+everything - a dead end, legacy `api/s/default/stat/device` had the
+real data). Confirmed: all 5 APs uplink to `Switch-MainNet` directly
+(ports 2-6), and `Switch-PiCluster` does *not* uplink to `Switch-MainNet`
+or the Gateway directly - it's wired into a passthrough port on
+`In-Wall-Office`, which itself uplinks to `Switch-MainNet` port 6. So
+initially this looked like `Switch-MainNet` was a strict superset of
+`Switch-PiCluster`'s blast radius, not a smaller separate test - flagged
+this to the user before proceeding.
+
+**User correction, verified true**: pointed out that QNAP and the Pi
+nodes are "next to each other on that switch" - checked `stat/sta`
+and confirmed `valinor`/`valinor-m` (QNAP), `pinode-m`, and
+`k8smaster-m` are all wired directly into `Switch-PiCluster` itself
+(ports 2/3/7/8). NFS traffic between them is pure intra-switch L2
+traffic and never touches `Switch-PiCluster`'s own uplink, so a
+`Switch-MainNet` bounce genuinely can't interrupt it. Separately
+checked the user's "control session via WLAN" idea against the live
+route table on `k8smaster` and found the opposite: a static route
+(`192.168.2.1 via 192.168.1.1 dev end0`, metric 100, added earlier this
+session as the control-path reliability fix) sends UDM-API traffic out
+the wired NIC, not WLAN - so the apply's own control session *does*
+transit the same path being tested. Net effect: real risk was smaller
+than the initial "superset" framing, but not zero, and covered by the
+already-tested `http_max_retries` mechanism regardless.
+
+**The canary itself**: baseline captured first (`provisioned_at`,
+`uptime`, `num_sta` for every device). Plan-only confirmed a clean
+diff identical in shape to the already-applied APs (`allow_adoption`,
+`forget_on_destroy` only, 1 import/1 change/0 destroy). Real
+`-target=unifi_device.switch_mainnet` apply run, with a live NFS
+write-latency probe against the QNAP (`/mnt/nfs`) and a device-state
+poll running throughout. `unifi_device.switch_mainnet: Modifications
+complete after 1s` - the actual API write was fast; the ~4 minutes
+total was almost entirely `terraform init`/provider-plugin
+download/import/refresh overhead in the throwaway container, not a
+retry storm on the write itself (worth remembering next time this
+looks "stuck" - check the actual log content, not just elapsed time).
+
+**Result, checked directly against the API, not inferred from
+Terraform's exit code**: zero disruption anywhere. Every downstream
+device's `uptime` kept climbing smoothly from its own pre-apply value
+(`Switch-MainNet` 2789738s -> 2790413s, consistent with real elapsed
+time) - none reset, meaning nothing rebooted. `num_sta` identical to
+baseline on every single device (`In-Wall-Bedroom`:4, `UAP-Shed`:3,
+`In-Wall-Office`:4, `In-Wall-Bar`:3, `In-Wall-Lounge`:7,
+`Switch-PiCluster`:4) - zero clients dropped anywhere in the network,
+including on `Switch-PiCluster` itself despite its uplink transiting
+`Switch-MainNet`. NFS write latency to the QNAP stayed nominal
+throughout (single-digit ms, one self-resolving 138ms blip, nothing
+resembling an outage). `provisioned_at` did update to the apply
+timestamp - that's expected config-push bookkeeping, not evidence of
+a reboot; the `uptime` counter is the real tell and it didn't move.
+
+**What this settles**: the one open question motivating the whole
+"canary on the other switch" request - whether a UniFi *switch*
+bounces its ports on a metadata-only reprovision, as opposed to the
+AP behavior already tested - is now answered with real data, not
+inference: it doesn't. Combined with the topology/blast-radius
+corrections above, this removes the main unknown blocking a decision
+on `Switch-PiCluster` - the remaining risk there is bounded by the
+same mechanisms already proven twice now (AP canary, switch canary),
+just with a bigger (but now well-understood) set of things sitting
+downstream.
