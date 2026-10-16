@@ -251,6 +251,21 @@ resource "unifi_device" "in_wall_lounge" {
     tx_power_mode    = "auto"
     min_rssi_enabled = false
   }
+
+  # 2026-10-12: Bose Soundbar 900 pilot - wired onto the IoT VLAN through this
+  # in-wall AP's passthrough LAN port 1 (access port, untagged IoT). Per the
+  # provider docs APs ignore per-port VLAN config unless switch_vlan_enabled
+  # is true, and that flag can only be turned off again via the UI.
+  # Wi-Fi fallback: the hidden ARDA_IOT SSID in wlan.tf.
+  switch_vlan_enabled = true
+  port_override {
+    number                = 1
+    name                  = "Bose Soundbar (IoT)"
+    poe_mode              = "off" # no PoE out on this port
+    setting_preference    = "manual"
+    forward               = "native"
+    native_networkconf_id = unifi_network.iot.id
+  }
 }
 
 # Import IDs: no "Import" section in the provider's device.md docs at

@@ -5,6 +5,7 @@
   vars_files:
     - variables/common/set_environment.yml
     - variables/play/day0_bootstrap.yml
+    - variables/play/node_network.yml
 
   pre_tasks:
     - name: Ensure roles from requirements.yml are installed
@@ -20,6 +21,16 @@
     - name: Check prerequisites
       ansible.builtin.include_role:
         name: prep_prerequisites
+
+    # Node IoT-VLAN leg + resolver list (host_vars decide who opts in; a no-op
+    # on the QNAP and localhost). Also runnable alone: node-vlan-legs.yml.
+    - name: Reconcile node IoT-VLAN legs and resolver lists
+      ansible.builtin.include_role:
+        name: node_vlan_legs
+
+    - name: Clean up stuck first-boot and network leftovers
+      ansible.builtin.include_role:
+        name: node_systemd_hygiene
 
     - name: Install all required software
       ansible.builtin.include_role:

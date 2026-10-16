@@ -1,0 +1,30 @@
+---
+# Shared tuning for roles/node_vlan_legs. Per-host switches live in
+# variables/cli/host_vars/<host>.yml (node_ssh_listen_address,
+# node_iot_guard_enabled, node_iot_leg).
+node_iot_guard:
+  iot_subnet: 192.168.40.0/24
+  # What the IoT leg may reach on a node. Nothing else is answered.
+  # 8097  Music Assistant stream server (speakers pull audio from it)
+  # 8927  Sendspin websocket (Sendspin nodes connect to MA)
+  allow_tcp: [8097, 8927]
+  # 5353  mDNS (AirPlay / Cast / Sendspin discovery)
+  allow_udp: [5353]
+  # AirPlay 2 receivers open connections back to the controller on random
+  # high ports (timing / events). Allowed ONLY from the IoT subnet and only
+  # in the ephemeral range, which excludes flannel (8472), kubelet (10250),
+  # NodePorts (30000-32767) and Longhorn. Turn off to tighten once observed.
+  allow_ephemeral_from_iot: true
+  # Rate-limited log of what is being dropped (journalctl -k | grep iot-guard)
+  log_drops: true
+
+# Options for roles/node_systemd_hygiene (the per-host switch is
+# node_hygiene_enabled in variables/cli/host_vars/<host>.yml).
+node_hygiene:
+  # Raspberry Pi first-boot dialog; hangs on /dev/tty8 and blocks multi-user.target
+  remove_userconf: true
+  # NetworkManager owns the network; networkd only fails (no .network files)
+  mask_networkd: true
+  # no datasource here: the stages hang (pinode-01) or fail (k8smaster)
+  disable_cloud_init: true
+  wait_for_running: true

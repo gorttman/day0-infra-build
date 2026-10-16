@@ -1,0 +1,111 @@
+---
+# Written 2026-10-12. Cleans up first-boot and network leftovers that leave
+# systemd "starting" (pinode-01: userconfig.service waits forever on /dev/tty8,
+# which holds multi-user.target, cloud-final and the apt timers) or "degraded"
+# (k8smaster: cloud-init stages fail). Nothing here touches NetworkManager,
+# the node's addresses, sshd or the cluster. mnt-backup.mount is a separate
+# issue and is deliberately left alone.
+
+- name: Node systemd hygiene
+  when: node_hygiene_enabled | bool
+  become: true
+  block:
+    - name: Read installed packages and services
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Read service states
+      ansible.builtin.service_facts:
+
+    # --- Raspberry Pi first-boot dialog ------------------------------------
+    - name: Stop the first-boot user dialog if it is hanging
+      ansible.builtin.systemd:
+        name: userconfig.service
+        state: stopped
+      register: node_userconfig_stop
+      retries: 3
+      delay: 5
+      until: node_userconfig_stop is succeeded
+      when:
+        - node_hygiene.remove_userconf | bool
+        - "'userconf-pi' in ansible_facts.packages"
+
+    # Removes only this package (checked with apt-get -s purge). It also
+    # removes the "SSH may not work until a valid user has been set up" banner.
+    - name: Purge the first-boot user tool
+      ansible.builtin.apt:
+        name: userconf-pi
+        state: absent
+        purge: true
+        autoremove: false
+      when: node_hygiene.remove_userconf | bool
+
+    # --- systemd-networkd (NetworkManager owns the network here) -------------
+    - name: Check NetworkManager is running before touching networkd
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['NetworkManager.service'].state == 'running'
+        quiet: true
+      when: node_hygiene.mask_networkd | bool
+
+    # Read-only; no module reports which links networkd manages.
+    - name: List links networkd manages
+      ansible.builtin.command: networkctl list --no-legend --no-pager
+      register: node_networkctl
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: node_hygiene.mask_networkd | bool
+
+    - name: Check networkd manages no link
+      ansible.builtin.assert:
+        that:
+          - "' configured ' not in node_networkctl.stdout"
+          - "' configuring ' not in node_networkctl.stdout"
+        fail_msg: "networkd manages a link; not masking it: {{ node_networkctl.stdout }}"
+        quiet: true
+      when: node_hygiene.mask_networkd | bool
+
+    - name: Stop, disable and mask systemd-networkd and its wait-online
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+        masked: true
+      loop:
+        - systemd-networkd.socket
+        - systemd-networkd.service
+        - systemd-networkd-wait-online.service
+      register: node_networkd_mask
+      retries: 3
+      delay: 5
+      until: node_networkd_mask is succeeded
+      when: node_hygiene.mask_networkd | bool
+
+    # --- cloud-init (no datasource here; its stages only fail or hang) -------
+    - name: Turn cloud-init off at boot (documented switch)
+      ansible.builtin.file:
+        path: /etc/cloud/cloud-init.disabled
+        state: touch
+        owner: root
+        group: root
+        mode: "0644"
+        access_time: preserve
+        modification_time: preserve
+      when: node_hygiene.disable_cloud_init | bool
+
+    # --- result ----------------------------------------------------------------
+    # No module reports the manager state. 'degraded' is accepted: pinode-01
+    # still has the separate mnt-backup.mount failure.
+    - name: Wait until systemd has left "starting"
+      ansible.builtin.command: systemctl is-system-running
+      register: node_sysstate
+      changed_when: false
+      check_mode: false
+      failed_when: node_sysstate.stdout not in ['running', 'degraded']
+      retries: 12
+      delay: 5
+      until: node_sysstate.stdout in ['running', 'degraded']
+      when:
+        - node_hygiene.wait_for_running | bool
+        - not ansible_check_mode

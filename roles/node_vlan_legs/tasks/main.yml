@@ -1,0 +1,74 @@
+---
+# Written 2026-10-12 for the Bose / IoT VLAN pilot. Deliberately separate from
+# prep_prerequisites' backend-vlan task: that one still carries the pre-VLAN20
+# address (backend_vlan_ip 192.168.1.10/27) and must NOT be run until it is
+# reconciled. Nothing here touches the node's primary address or routes.
+
+- name: Reconcile the node's own resolver list on its primary connection
+  when: node_primary_conn | length > 0
+  become: true
+  block:
+    # Same module and parameters prep_prerequisites uses for DNS. Only the
+    # properties named here are compared/changed (checked with --check --diff
+    # against both live nodes: the address, gateway and method are untouched).
+    - name: Set the resolver list (Pi-hole A, Pi-hole B, then the last-resort fallback)
+      community.general.nmcli:
+        conn_name: "{{ node_primary_conn }}"
+        ifname: "{{ node_primary_ifname }}"
+        type: ethernet
+        dns4: "{{ wifi_mgmt_dns }}"
+        dns4_ignore_auto: true
+        state: present
+      register: node_dns
+
+    # No module activates a profile; this is the one place a command is
+    # needed (prep_prerequisites does the same). Reapply, not 'up', so the
+    # link is never bounced.
+    - name: Apply the new resolver list to the live link without bouncing it
+      ansible.builtin.command: "nmcli device reapply {{ node_primary_ifname }}"
+      when: node_dns is changed
+      changed_when: true
+
+- name: IoT VLAN leg
+  when: node_iot_leg.enabled | bool
+  become: true
+  block:
+    - name: Check the leg is fully specified
+      ansible.builtin.assert:
+        that:
+          - node_iot_leg.parent | length > 0
+          - node_iot_leg.address | length > 0
+        quiet: true
+
+    - name: Tagged VLAN sub-interface on the parent NIC (no gateway, no default route)
+      community.general.nmcli:
+        conn_name: "{{ node_iot_leg.conn_name }}"
+        type: vlan
+        vlandev: "{{ node_iot_leg.parent }}"
+        vlanid: "{{ node_iot_leg.vlan_id }}"
+        ifname: "{{ node_iot_leg.parent }}.{{ node_iot_leg.vlan_id }}"
+        method4: manual
+        ip4: "{{ node_iot_leg.address }}"
+        never_default4: true
+        method6: disabled
+        autoconnect: true
+        state: present
+      register: node_leg
+
+    - name: Bring the leg up when it was just created or changed
+      ansible.builtin.command: "nmcli connection up {{ node_iot_leg.conn_name }}"
+      when: node_leg is changed
+
+- name: Restrict sshd to the Trusted address
+  when: node_ssh_listen_address | length > 0
+  become: true
+  block:
+    - name: Include the sshd socket tasks
+      ansible.builtin.include_tasks: ssh.yml
+
+- name: Host firewall table for the IoT leg
+  when: node_iot_guard_enabled | bool
+  become: true
+  block:
+    - name: Include the guard tasks
+      ansible.builtin.include_tasks: guard.yml

@@ -161,6 +161,17 @@ resource "unifi_user" "chromecast_pergola" {
   blocked          = false
 }
 
+# Bose Smart Soundbar 900, WIRED MAC (via In-Wall Lounge port 1, IoT VLAN).
+# Its Wi-Fi MAC (...18:b9) is a separate record and is deliberately not
+# reserved - the hidden ARDA_IOT SSID is only a fallback.
+resource "unifi_user" "bose_soundbar_900" {
+  mac        = "c8:7b:23:7c:18:b3"
+  name       = "Bose Soundbar 900"
+  fixed_ip   = "192.168.40.21" # sound/HID block .21-.50, outside the DHCP pool
+  network_id = unifi_network.iot.id
+  blocked    = false
+}
+
 resource "unifi_user" "fetchbox_pantry" {
   mac             = "e0:9f:2a:b3:95:22"
   name            = "FetchBox Pantry"

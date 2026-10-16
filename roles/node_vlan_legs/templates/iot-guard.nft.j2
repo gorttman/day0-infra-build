@@ -1,0 +1,34 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible (roles/node_vlan_legs). Guards ONLY traffic that enters
+# on {{ node_guard_iface }}; every other interface is untouched, and no other
+# table is touched (the stock nftables.service does `flush ruleset`, so this
+# lives in its own unit, iot-guard.service).
+add table inet iot_guard
+flush table inet iot_guard
+
+table inet iot_guard {
+	chain iot_leg {
+		ct state established,related accept
+		ct state invalid drop
+		ip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded } accept
+		ip protocol igmp accept
+{% if node_iot_guard.allow_tcp | length > 0 %}
+		tcp dport { {{ node_iot_guard.allow_tcp | join(', ') }} } accept
+{% endif %}
+{% if node_iot_guard.allow_udp | length > 0 %}
+		udp dport { {{ node_iot_guard.allow_udp | join(', ') }} } accept
+{% endif %}
+{% if node_iot_guard.allow_ephemeral_from_iot %}
+		ip saddr {{ node_iot_guard.iot_subnet }} meta l4proto { tcp, udp } th dport 32768-60999 accept
+{% endif %}
+{% if node_iot_guard.log_drops %}
+		limit rate 6/minute log prefix "iot-guard drop: " level info
+{% endif %}
+		counter drop
+	}
+
+	chain input {
+		type filter hook input priority -10; policy accept;
+		iifname "{{ node_guard_iface }}" jump iot_leg
+	}
+}

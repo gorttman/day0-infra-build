@@ -1,0 +1,4 @@
+---
+# Per-host switch lives in variables/cli/host_vars/<host>.yml; the shared option
+# dictionary (node_hygiene) lives in variables/play/node_network.yml.
+node_hygiene_enabled: false

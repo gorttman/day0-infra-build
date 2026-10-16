@@ -1,0 +1,19 @@
+# Managed by Ansible (roles/node_vlan_legs)
+[Unit]
+Description=Host firewall table guarding the IoT VLAN leg ({{ node_guard_iface }})
+Documentation=file:///etc/nftables.d/iot-guard.nft
+# nftables.service starts with `flush ruleset`; load after it, and be re-run
+# whenever it is (re)started, or this table would vanish.
+Wants=network-pre.target
+Before=network-pre.target
+After=nftables.service
+PartOf=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/iot-guard.nft
+ExecStop=/usr/sbin/nft delete table inet iot_guard
+
+[Install]
+WantedBy=multi-user.target
