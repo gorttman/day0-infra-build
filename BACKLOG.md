@@ -13,6 +13,13 @@ _Nothing currently in flight._
 
 ## Todo
 
+### Move cloudflare-tf out of ArgoCD into a plan-first Ansible play (added 2026-10-17)
+`day1-foundation/apps/cloudflare-tf` runs `terraform plan` then `apply` in one ArgoCD Sync-hook Job, with auto-sync on. Any push that touches that app applies to live Cloudflare (DNS, tunnel, WAF, mTLS) with no review step. Confirmed 2026-10-17: a comment-only `email.tf` push re-ran the apply; it succeeded and DNS was unchanged, but nothing in the process would have stopped a harmful change.
+- **Target:** same shape as `unifi-tf-apply.yml`: plan by default, apply only with an explicit `-e ..._do_apply=true`, and refuse any destroy.
+- **Keep:** the Postgres state backend, the sealed secrets, and the mTLS runbooks in the app README.
+- **Order:** build the play, run a plan and confirm it reports no changes, then remove the ArgoCD app (two steps: comment out, then clean up; see the ArgoCD app-removal note).
+- **Until then:** treat any push under `day1-foundation/apps/cloudflare-tf/` as a live Cloudflare apply.
+
 ### Bug (URGENT): worker nodes go offline after ~24 hours and cannot be SSH'd into
 After approximately 24 hours, PXE-booted worker nodes (pinode-01 etc.) become unreachable — no SSH, node may drop out of `kubectl get nodes`. Master is unaffected.
 - **Suspected causes:** DHCP lease expiry (default ISC DHCP lease is 24h — node may lose its IP or fail to renew), NFS root mount going stale/timing out (NFS hard mount with `timeo=600` could lock up on reconnect), or SSH host key rotation on the shared NFS rootfs conflicting with per-node overlay
