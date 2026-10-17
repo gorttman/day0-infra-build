@@ -33,29 +33,8 @@ After approximately 24 hours, PXE-booted worker nodes (pinode-01 etc.) become un
 ### Feature: 1Password integration for credential population
 Currently `credentials/git-pat/token.txt` and `credentials/wifi/{ssid,psk}` are populated manually. A `populate_credentials` role using `community.general.onepassword` lookup + `op` CLI would fetch secrets from 1Password on first run (or on `--tags rotate_git_token` / `--tags change_wifi`). Files are the working copy; 1Password is source of truth. Needs `op` CLI installed on the Pi and `eval $(op signin)` or `OP_SERVICE_ACCOUNT_TOKEN` set before running.
 
-### Feature: QNAP NAS syslog-archive NFS export automation — PARTIALLY DONE 2026-08-22
-`qnap_main_pool_dirs` (creates the directory) and `qnap_exports`
-(writes all 6 `nfssetting` sections) both now cover `syslog-archive` -
-see `variables/play/qnap_main_pool_dirs.yml` and
-`variables/play/qnap_nfs_exports.yml`. Confirmed live this does NOT
-actually create a working export on its own: `nfssetting` had all 6
-sections correctly written, NFS was restarted, but `/etc/exports`
-(the real kernel export table QTS generates) never picked up the new
-path, and it never appeared in `showmount -e`. pihole/calibre-web work
-via this same automation only because they were already registered as
-QTS "Shared Folders" through some other means before this role took
-over managing their permissions - a brand-new directory that was only
-ever `mkdir -p`'d doesn't get that registration, and no `qcli_*` tool
-was found that does it (checked `qcli_storage`, `qcli_volume` - neither
-has a share-creation option). Real remaining step: create the
-`syslog-archive` Shared Folder once via the QTS web UI (Control Panel
-→ Shared Folders → Create), after which this existing automation
-should correctly manage its NFS permissions going forward. Not
-attempted live - didn't want to keep experimenting against a QNAP
-that had just had one brief self-inflicted NFS outage during this same
-session (recovered clean, `hard` mounts absorbed it, but not worth
-pushing further tonight).
-- **Details:** `docs/rebuild-runbook.md` §5, `docs/pi-1-inventory.md` §9 Fix 7
+### Feature: QNAP NAS syslog-archive NFS export automation - RETIRED 2026-10-18
+The old syslog-ng server and log-archiver were removed; the share is no longer needed or managed.
 
 ### Feature: pin k3s version
 Currently `get.k3s.io` installs latest stable. Intentional for now. Revisit if a bad release causes a broken rebuild — at that point add `INSTALL_K3S_VERSION` to the install task.

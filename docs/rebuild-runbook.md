@@ -112,31 +112,9 @@ This:
 
 ---
 
-## Step 5 — QNAP: syslog-archive export
+## Step 5 — QNAP: syslog-archive export (retired)
 
-The log-archiver CronJob mounts `/syslog-archive` from valinor-m (192.168.1.30).
-
-**Directory + NFS permissions are automated** (as of 2026-08-22) via:
-```bash
-ansible-playbook qnap-manage.yml --tags manage_qnap_main_pool_dirs,manage_qnap_exports
-```
-This creates `/share/CACHEDEV1_DATA/syslog-archive` and writes all 6
-`nfssetting` sections correctly — but confirmed live that this alone
-does **not** make the export actually appear (`showmount -e` won't
-list it, `/etc/exports` won't contain it), because QTS needs the
-directory registered as a real "Shared Folder" first, not just
-present on disk. No `qcli_*` command was found that does this
-registration. **One remaining manual step:** create the
-`syslog-archive` Shared Folder once via the QTS web UI (Control Panel
-→ Shared Folders → Create) before running the Ansible above — after
-that one-time registration, this automation correctly manages its
-permissions on every future run, same as pihole/calibre-web.
-
-SSH access for any manual QNAP work: `ssh -i credentials/qnap_ansible_ed25519 admin@192.168.1.30` — the QTS admin account's `authorized_keys`, not the `admin`/`admin` password (retired 2026-08-07).
-
-If a manual `nfssetting` edit is ever needed instead: it's `/etc/init.d/nfs restart` to reload, **not** `nfs.sh` (that script doesn't exist on this QTS version — confirmed the hard way, see `roles/qnap_exports/handlers/main.yml`).
-
----
+Removed 2026-10-18. The old syslog-ng server and log-archiver were replaced by Loki, Garage and Alloy (see `day2-services` apps/loki, garage, alloy). No `/syslog-archive` share is needed.
 
 ## Step 6 — Wait for ArgoCD to sync
 
@@ -179,11 +157,9 @@ kubectl get pods -A | grep -v "Running\|Completed"
 # dhcpd serving backend VLAN
 kubectl logs -n infra deployment/dhcpd | grep Listening
 
-# syslog-ng receiving logs from k8smaster (should be > 0)
-kubectl exec -n logging deployment/syslog-ng -- syslog-ng-ctl stats | grep "s_network_tcp.*processed"
-
-# per-host log dirs (one per forwarding node)
-ls /srv/nfs/syslog-store/logging-syslog-storage-pvc-*/
+# Alloy collecting on every node, Loki ready
+kubectl get ds -n alloy
+kubectl get pods -n loki
 ```
 
 ---
@@ -207,8 +183,7 @@ ls /srv/nfs/syslog-store/logging-syslog-storage-pvc-*/
 - [ ] pinode-01 joins cluster
 - [ ] pihole resolving DNS
 - [ ] log-archiver CronJob completes at 02:00
-- [ ] syslog-ng receiving logs (`syslog-ng-ctl stats` shows TCP processed > 0)
-- [ ] Per-node log dirs present in `/srv/nfs/syslog-store/.../`
+- [ ] Alloy DaemonSet ready on every node and Loki pod Running
 - [ ] ArgoCD UI accessible at https://192.168.2.10:30443
 
 ## Secrets applied outside ArgoCD

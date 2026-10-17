@@ -60,7 +60,7 @@ qnap_nfs_squash:
 # why it was the one share that kept working.
 #
 # Also note only 4 exports were ever managed here (backup, pihole,
-# calibre-web, syslog-archive); the other 9 were live-only and had no
+# calibre-web, syslog-archive - since removed, 2026-10-18); the other 9 were live-only and had no
 # code representation at all. All 13 are now listed. /Public is
 # deliberately NOT managed - its "*" ACL works and has a different
 # shape (1 rule, not 2-3).
@@ -77,12 +77,6 @@ qnap_nfs_acl:
     squash: "no_root_squash,no_root_squash"
     anon_uid: "1000,1000"
     anon_gid: "100,100"
-  - path: /share/CACHEDEV1_DATA/syslog-archive
-    allow_ip: "192.168.20.10,192.168.20.11,192.168.20.12"
-    permission: "rw,rw,rw"
-    squash: "no_root_squash,no_root_squash,no_root_squash"
-    anon_uid: "65534,65534,65534"
-    anon_gid: "65534,65534,65534"
   - path: /share/CACHEDEV1_DATA/calibre-web
     allow_ip: "192.168.20.10,192.168.20.11,192.168.20.12"
     permission: "rw,rw,rw"
@@ -183,16 +177,6 @@ qnap_nfs_new_exports:
     anon_uid: "65534,65534,65534"
     anon_gid: "65534,65534,65534"
   - path: /share/CACHEDEV1_DATA/calibre-web
-    allow_ip: "192.168.20.10,192.168.20.11,192.168.20.12"
-    permission: "rw,rw,rw"
-    squash: "no_root_squash,no_root_squash,no_root_squash"
-    anon_uid: "65534,65534,65534"
-    anon_gid: "65534,65534,65534"
-  # Was a fully manual step (rebuild-runbook.md Step 5) - folded in
-  # 2026-08-22 as part of the disaster-recovery audit. Same allow_ip
-  # pattern as pihole/calibre-web (log-archiver has no nodeSelector, so
-  # it could land on either node).
-  - path: /share/CACHEDEV1_DATA/syslog-archive
     allow_ip: "192.168.20.10,192.168.20.11,192.168.20.12"
     permission: "rw,rw,rw"
     squash: "no_root_squash,no_root_squash,no_root_squash"
