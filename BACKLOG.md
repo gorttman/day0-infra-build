@@ -21,6 +21,11 @@ Built as `cloudflare-tf-apply.yml` + role `cloudflare_tf_apply`; plan-only run i
 - **Order:** build the play, run a plan and confirm it reports no changes, then remove the ArgoCD app (two steps: comment out, then clean up; see the ArgoCD app-removal note).
 - **Until then:** treat any push under `day1-foundation/apps/cloudflare-tf/` as a live Cloudflare apply.
 
+### Reminder: IoT <-> Trusted isolation and inter-VLAN firewall logging (added 2026-10-19)
+Parked by choice, pick up later. The UDM only logs traffic to itself (`*_LOCAL` default policy), so the Log Rollup dashboard has no VLAN-to-VLAN data, and the IoT <-> Trusted isolation rule was never created (the UniFi Terraform provider has no resource for it; see the UniFi VLAN redesign note).
+- **Needed:** create the isolation (UniFi UI or a provider/API route), turn on logging for the block rules, then confirm drops appear in `log_events` (class firewall, ruleset not `*_LOCAL`).
+- **Then:** the Log Rollup firewall panels fill in without any rollup change; the logging stack is already ready (see the cluster-logging memory note).
+
 ### Bug (URGENT): worker nodes go offline after ~24 hours and cannot be SSH'd into
 After approximately 24 hours, PXE-booted worker nodes (pinode-01 etc.) become unreachable — no SSH, node may drop out of `kubectl get nodes`. Master is unaffected.
 - **Suspected causes:** DHCP lease expiry (default ISC DHCP lease is 24h — node may lose its IP or fail to renew), NFS root mount going stale/timing out (NFS hard mount with `timeo=600` could lock up on reconnect), or SSH host key rotation on the shared NFS rootfs conflicting with per-node overlay
