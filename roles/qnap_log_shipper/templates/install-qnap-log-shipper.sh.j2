@@ -86,8 +86,13 @@ ship_kernel() {
 # one shipped. The record's own date stays in the text (arrival time is not
 # event time), so the first run ships the full history.
 ship_events() {
-  local f={{ qnap_log_shipper_event_log }} sf="$STATE/{{ qnap_log_shipper_event_tag }}" last
+  local f={{ qnap_log_shipper_event_log }} sf="$STATE/{{ qnap_log_shipper_event_tag }}" last n
   [ -f "$f" ] || return 0
+  # Skip the whole parse unless the file changed since we last caught up: it is
+  # 660 KB and this box is busy. The marker is touched BEFORE parsing, so a write
+  # that lands mid-parse is still newer than it and gets picked up next run.
+  if [ -f "$sf.seen" ] && [ ! "$f" -nt "$sf.seen" ]; then return 0; fi
+  touch "$sf.seen.new"
   last=$(cat "$sf" 2>/dev/null)
   strings -n 12 "$f" \
     | grep -aoE '20[0-9]{2}-[0-9]{2}-[0-9]{2}[0-9]{2}:[0-9]{2}:[0-9]{2}[A-Za-z]+[0-9.]+[A-Za-z0-9_-]+.*' \
@@ -96,9 +101,13 @@ ship_events() {
     | awk -v last="$last" -v max="$MAXLINES" -v out="$sf.new" '
         { ts = substr($0, 1, 19); if (ts > last && n < max) { print; n++; lt = ts } }
         END { if (n) printf "%s", lt > out }' > "$tmp.e"
-  [ -s "$tmp.e" ] || return 0
-  send_file {{ qnap_log_shipper_event_tag }} "$tmp.e" ""
-  mv "$sf.new" "$sf"
+  if [ -s "$tmp.e" ]; then
+    send_file {{ qnap_log_shipper_event_tag }} "$tmp.e" ""
+    mv "$sf.new" "$sf"
+  fi
+  n=$(wc -l < "$tmp.e")
+  # Fewer than the cap means everything has been sent: remember that.
+  if [ "$n" -lt "$MAXLINES" ]; then mv "$sf.seen.new" "$sf.seen"; else rm -f "$sf.seen.new"; fi
 }
 
 # One health line a minute: enough to see an NFS server stall or restart later.
