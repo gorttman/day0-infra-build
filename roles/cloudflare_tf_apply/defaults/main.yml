@@ -1,0 +1,16 @@
+---
+# Plan-only by default. Applying needs BOTH of:
+#   -e cloudflare_tf_do_apply=true
+#   -e cloudflare_tf_approved_plan=<PLAN_SHA printed by the plan-only run>
+# so what gets applied is exactly what was reviewed. A destroy additionally
+# needs -e cloudflare_tf_allow_destroy=true.
+cloudflare_tf_do_apply: false
+cloudflare_tf_approved_plan: ""
+cloudflare_tf_allow_destroy: false
+
+cloudflare_tf_kubeconfig: /etc/rancher/k3s/k3s.yaml
+cloudflare_tf_namespace: infra
+cloudflare_tf_job_name: cloudflare-tf-apply-manual
+cloudflare_tf_configmap_name: cloudflare-tf-apply-config
+cloudflare_tf_secret_name: cloudflare-tf-secrets
+cloudflare_tf_image: hashicorp/terraform:1.9.8

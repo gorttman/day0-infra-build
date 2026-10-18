@@ -13,7 +13,8 @@ _Nothing currently in flight._
 
 ## Todo
 
-### Move cloudflare-tf out of ArgoCD into a plan-first Ansible play (added 2026-10-17)
+### DONE 2026-10-18: Move cloudflare-tf out of ArgoCD into a plan-first Ansible play (added 2026-10-17)
+Built as `cloudflare-tf-apply.yml` + role `cloudflare_tf_apply`; plan-only run idempotent (changed=0 second run), apply needs the approved plan fingerprint, destroy refused. ArgoCD app removed from day1-foundation. Original notes:
 `day1-foundation/apps/cloudflare-tf` runs `terraform plan` then `apply` in one ArgoCD Sync-hook Job, with auto-sync on. Any push that touches that app applies to live Cloudflare (DNS, tunnel, WAF, mTLS) with no review step. Confirmed 2026-10-17: a comment-only `email.tf` push re-ran the apply; it succeeded and DNS was unchanged, but nothing in the process would have stopped a harmful change.
 - **Target:** same shape as `unifi-tf-apply.yml`: plan by default, apply only with an explicit `-e ..._do_apply=true`, and refuse any destroy.
 - **Keep:** the Postgres state backend, the sealed secrets, and the mTLS runbooks in the app README.

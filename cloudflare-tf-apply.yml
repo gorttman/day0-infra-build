@@ -1,0 +1,31 @@
+################################################################################
+# FILE: cloudflare-tf-apply.yml
+################################################################################
+# Relocated here from day1-foundation, out of ArgoCD's auto-sync path
+# (same reasoning and same pattern as unifi-tf-apply.yml): this manages a
+# live external system (Cloudflare DNS, tunnel, WAF, mTLS, email records),
+# and a push must never be able to apply it. A push now changes nothing;
+# a human runs this play.
+#
+# Two steps, and the second applies exactly what the first showed:
+#
+#   ansible-playbook cloudflare-tf-apply.yml
+#       Plan only. Prints the plan and a PLAN_SHA fingerprint of it.
+#
+#   ansible-playbook cloudflare-tf-apply.yml \
+#       -e cloudflare_tf_do_apply=true -e cloudflare_tf_approved_plan=<PLAN_SHA>
+#       Re-plans, refuses unless the fresh plan has the same fingerprint
+#       as the one you reviewed, refuses any destroy, then applies.
+#
+# See roles/cloudflare_tf_apply/{README,HISTORY}.md.
+
+- name: Plan (and optionally apply) the Cloudflare Terraform config
+  hosts: k8smaster
+  gather_facts: false
+  tags:
+    - manage_cloudflare_tf
+
+  tasks:
+    - name: Run the cloudflare-tf apply role
+      ansible.builtin.include_role:
+        name: cloudflare_tf_apply

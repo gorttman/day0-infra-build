@@ -1,0 +1,132 @@
+---
+# Idempotent by construction: every "make sure X exists" step uses
+# kubernetes.core.k8s, which reports changed only when the object actually
+# differs, so a second run of the plan-only play reports changed=0 for the
+# setup steps. The Job itself is a run, not state, and is always recreated.
+- name: Ensure the namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ cloudflare_tf_namespace }}"
+
+# The SealedSecret blob was sealed against this cluster's controller and is
+# namespace/name-scoped, so applying it here is a no-op when it is already
+# present. It makes this role self-sufficient rather than dependent on
+# ArgoCD keeping the secret around.
+- name: Ensure the cloudflare-tf secrets exist (SealedSecret)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    state: present
+    src: "{{ role_path }}/files/cloudflare-tf-sealedsecret.yml"
+
+- name: Read the terraform files
+  ansible.builtin.set_fact:
+    cloudflare_tf_cm_data: >-
+      {{ cloudflare_tf_cm_data | default({}) | combine({item | basename: lookup('ansible.builtin.file', item)}) }}
+  loop: "{{ query('ansible.builtin.fileglob', role_path ~ '/files/terraform/*.tf') | sort }}"
+
+- name: Ensure the scratch ConfigMap matches the current terraform/ directory
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ cloudflare_tf_configmap_name }}"
+        namespace: "{{ cloudflare_tf_namespace }}"
+      data: "{{ cloudflare_tf_cm_data }}"
+
+- name: Remove any previous run of the Job
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    name: "{{ cloudflare_tf_job_name }}"
+    namespace: "{{ cloudflare_tf_namespace }}"
+    wait: true
+    delete_options:
+      propagationPolicy: Foreground
+
+- name: Start the Job
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    state: present
+    template: cloudflare-tf-apply-job.yml.j2
+  # A run, not state: reported via the final "applied" task instead.
+  changed_when: false
+
+# Not .status.conditions[0] - newer Kubernetes puts SuccessCriteriaMet
+# first (see unifi_tf_apply for the live finding). succeeded/failed counts
+# are the reliable terminal signal.
+- name: Wait for the Job to finish
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    api_version: batch/v1
+    kind: Job
+    name: "{{ cloudflare_tf_job_name }}"
+    namespace: "{{ cloudflare_tf_namespace }}"
+  register: cloudflare_tf_job
+  until: >-
+    cloudflare_tf_job.resources | length > 0 and
+    (cloudflare_tf_job.resources[0].status.succeeded | default(0) | int > 0 or
+     cloudflare_tf_job.resources[0].status.failed | default(0) | int > 0)
+  retries: 100
+  delay: 6
+  changed_when: false
+
+- name: Fetch the Job output
+  kubernetes.core.k8s_log:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    api_version: batch/v1
+    kind: Job
+    name: "{{ cloudflare_tf_job_name }}"
+    namespace: "{{ cloudflare_tf_namespace }}"
+  register: cloudflare_tf_logs
+  changed_when: false
+
+- name: Show the plan / apply output
+  ansible.builtin.debug:
+    msg: "{{ cloudflare_tf_logs.log_lines }}"
+
+- name: Work out what happened
+  ansible.builtin.set_fact:
+    cloudflare_tf_failed: "{{ cloudflare_tf_job.resources[0].status.failed | default(0) | int > 0 }}"
+    cloudflare_tf_plan_sha: >-
+      {{ cloudflare_tf_logs.log_lines | select('match', '^PLAN_SHA=') | map('regex_replace', '^PLAN_SHA=', '') | first | default('') }}
+    cloudflare_tf_applied: "{{ cloudflare_tf_logs.log_lines | select('match', '^=== APPLIED ') | list | length > 0 }}"
+
+# The ConfigMap is state (it mirrors files/terraform), so it stays: that is
+# what lets a second run report changed=0. Only the Job is a run artefact.
+- name: Clean up the Job
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cloudflare_tf_kubeconfig }}"
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    name: "{{ cloudflare_tf_job_name }}"
+    namespace: "{{ cloudflare_tf_namespace }}"
+  changed_when: false
+
+- name: Fail if the Job failed (destroy guard, plan mismatch, or a real error)
+  ansible.builtin.fail:
+    msg: "{{ cloudflare_tf_job_name }} failed - see the output above for why."
+  when: cloudflare_tf_failed | bool
+
+- name: How to apply exactly this plan
+  ansible.builtin.debug:
+    msg: >-
+      Plan fingerprint {{ cloudflare_tf_plan_sha }}. To apply exactly this:
+      ansible-playbook cloudflare-tf-apply.yml -e cloudflare_tf_do_apply=true
+      -e cloudflare_tf_approved_plan={{ cloudflare_tf_plan_sha }}
+  when: not (cloudflare_tf_do_apply | bool)
+
+- name: Report whether anything was applied
+  ansible.builtin.debug:
+    msg: "{{ 'Applied plan ' ~ cloudflare_tf_plan_sha if cloudflare_tf_applied else 'Nothing applied.' }}"
+  changed_when: cloudflare_tf_applied | bool
