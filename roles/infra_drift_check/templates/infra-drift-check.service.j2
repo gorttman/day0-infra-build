@@ -1,0 +1,8 @@
+[Unit]
+Description=Read-only drift check of the Terraform-managed infrastructure (plan only)
+After=network-online.target k3s.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/infra-drift-check
+TimeoutStartSec=1800

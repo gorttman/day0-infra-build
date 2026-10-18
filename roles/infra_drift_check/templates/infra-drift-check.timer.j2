@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly infrastructure drift check
+
+[Timer]
+OnCalendar=*-*-* {{ infra_drift_check_time }}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

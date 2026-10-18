@@ -1,0 +1,52 @@
+#!/bin/bash
+# Read-only nightly drift check for the Terraform-managed stacks.
+#
+# Runs each stack's plan-only play, counts resources whose plan is not empty
+# and not on the known-benign list, and writes the result to InfluxDB
+# (measurement infra_drift) so Grafana can alert. Never applies anything:
+# the plays default to plan-only and this script never passes the apply flags.
+#
+# Known-benign entries live in /etc/infra-drift-known.txt, one per line:
+#   <stack> <terraform resource address>
+set -u
+REPO=/home/gorttman/gm-dev/day0-infra-build
+KNOWN=/etc/infra-drift-known.txt
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+cd "$REPO" || exit 1
+
+token=$(kubectl -n monitoring get secret telegraf-influxdb -o jsonpath='{.data.INFLUX_TOKEN}' | base64 -d) || exit 1
+influx=$(kubectl -n monitoring get svc influxdb -o jsonpath='{.spec.clusterIP}') || exit 1
+[ -n "$token" ] && [ -n "$influx" ] || { echo "cannot find InfluxDB token or address" >&2; exit 1; }
+
+now=$(date +%s)
+lines=""
+for pair in cloudflare:cloudflare-tf-apply.yml unifi:unifi-tf-apply.yml; do
+  stack=${pair%%:*}
+  play=${pair#*:}
+  out=$(ansible-playbook "$play" 2>&1)
+  rc=$?
+  clean=$(printf '%s\n' "$out" | tr -d '\\')
+  check_ok=0
+  if [ $rc -eq 0 ] && printf '%s\n' "$clean" | grep -qE 'Plan: |No changes'; then
+    check_ok=1
+  fi
+  drifted=0
+  benign=0
+  while read -r addr; do
+    [ -n "$addr" ] || continue
+    if grep -qxF "$stack $addr" "$KNOWN" 2>/dev/null; then
+      benign=$((benign + 1))
+    else
+      drifted=$((drifted + 1))
+      echo "DRIFT $stack: $addr"
+    fi
+  done < <(printf '%s\n' "$clean" | sed -n 's/.*# \([^ ]*\) \(will be\|must be\).*/\1/p' | sort -u)
+  echo "$stack: check_ok=$check_ok drifted=$drifted benign=$benign (play rc=$rc)"
+  lines+="infra_drift,stack=$stack drifted=${drifted}i,benign=${benign}i,check_ok=${check_ok}i ${now}"$'\n'
+done
+
+code=$(printf '%s' "$lines" | curl -s -o /dev/null -w '%{http_code}' -XPOST \
+  "http://${influx}:8086/api/v2/write?org=pilab&bucket=telegraf&precision=s" \
+  -H "Authorization: Token ${token}" --data-binary @-)
+echo "influx write: HTTP $code"
+[ "$code" = "204" ]

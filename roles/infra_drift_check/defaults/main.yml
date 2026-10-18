@@ -1,0 +1,5 @@
+---
+infra_drift_check_time: "02:30:00"
+# stack + terraform resource address, for plan entries that are known and harmless.
+infra_drift_check_known:
+  - "cloudflare cloudflare_zero_trust_device_default_profile.this"

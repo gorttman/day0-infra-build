@@ -1,0 +1,16 @@
+################################################################################
+# FILE: infra-drift-check.yml
+################################################################################
+# Installs the nightly READ-ONLY drift check (plan-only runs of the
+# Cloudflare and UniFi plays, reported to Grafana). Safe to run repeatedly.
+#
+#   sudo ansible-playbook infra-drift-check.yml
+#   sudo /usr/local/sbin/infra-drift-check        # run it now
+- name: Install the nightly infrastructure drift check
+  hosts: k8smaster
+  gather_facts: false
+  become: true
+  tags:
+    - infra_drift_check
+  roles:
+    - infra_drift_check
