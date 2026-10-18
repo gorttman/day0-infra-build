@@ -1,5 +1,6 @@
 #!/bin/bash
-# Read-only nightly drift check for the Terraform-managed stacks.
+# Read-only nightly drift check for the Terraform-managed stacks and the QNAP
+# NFS exports.
 #
 # Runs each stack's plan-only play, counts resources whose plan is not empty
 # and not on the known-benign list, and writes the result to InfluxDB
@@ -44,6 +45,25 @@ for pair in cloudflare:cloudflare-tf-apply.yml unifi:unifi-tf-apply.yml; do
   echo "$stack: check_ok=$check_ok drifted=$drifted benign=$benign (play rc=$rc)"
   lines+="infra_drift,stack=$stack drifted=${drifted}i,benign=${benign}i,check_ok=${check_ok}i ${now}"$'\n'
 done
+
+# QNAP NFS exports: check mode runs only read-only probes (grep/exportfs -v) over
+# ssh - a few tiny commands, nothing that writes or restarts NFS. Prints
+# "DRIFT qnap_exports: ..." or "NO DRIFT qnap_exports".
+out=$(ansible-playbook qnap-manage.yml --check --tags manage_qnap_exports 2>&1)
+rc=$?
+clean=$(printf '%s\n' "$out" | tr -d '\\')
+check_ok=0
+drifted=0
+if [ $rc -eq 0 ] && printf '%s\n' "$clean" | grep -q 'NO DRIFT qnap_exports'; then
+  check_ok=1
+elif [ $rc -eq 0 ] && printf '%s\n' "$clean" | grep -q 'DRIFT qnap_exports:'; then
+  check_ok=1
+  msg=$(printf '%s\n' "$clean" | grep -o 'DRIFT qnap_exports:[^"]*' | head -1)
+  drifted=$(printf '%s' "$msg" | sed 's/^DRIFT qnap_exports://' | tr ';' '\n' | grep -c '[^ ]')
+  echo "$msg"
+fi
+echo "qnap_exports: check_ok=$check_ok drifted=$drifted benign=0 (play rc=$rc)"
+lines+="infra_drift,stack=qnap_exports drifted=${drifted}i,benign=0i,check_ok=${check_ok}i ${now}"$'\n'
 
 code=$(printf '%s' "$lines" | curl -s -o /dev/null -w '%{http_code}' -XPOST \
   "http://${influx}:8086/api/v2/write?org=pilab&bucket=telegraf&precision=s" \

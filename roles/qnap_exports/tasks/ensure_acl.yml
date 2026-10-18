@@ -22,6 +22,7 @@
     label: "{{ item.path }}"
   register: acl_check
   changed_when: false
+  check_mode: false   # read-only probe; must really run under --check
 
 - name: Fix AllowIP where it doesn't match desired state
   ansible.builtin.raw: >-

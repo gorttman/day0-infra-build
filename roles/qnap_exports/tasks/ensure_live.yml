@@ -27,6 +27,7 @@
   ansible.builtin.raw: exportfs -v
   register: qnap_live_exports
   changed_when: false
+  check_mode: false   # read-only probe; must really run under --check
 
 - name: Re-create managed exports that are configured but not live
   ansible.builtin.raw: |
@@ -53,6 +54,7 @@
   ansible.builtin.raw: exportfs -v
   register: qnap_live_recheck
   changed_when: false
+  check_mode: false
   when: qnap_export_repair is changed
 
 # Fail loudly rather than leave a silently-dead export behind - the whole

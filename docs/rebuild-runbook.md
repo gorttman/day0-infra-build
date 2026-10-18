@@ -122,7 +122,6 @@ ArgoCD was bootstrapped in step 3. It will now pull and apply all workloads from
 - `day0-bootstrap` → cluster-level config
 - `day1-foundation` → cluster/infra-tier apps (networking, storage provisioning, cert-manager, ingress-nginx, monitoring, and the ArgoCD Application definitions for the repos below)
 - `day2-services` → the actual self-hosted app fleet (pihole, immich, paperless, jellyfin, arr-stack, books-pipeline, calibre-web, obsidian, vscode-server, postgres, and others — this list changes often; `kubectl get applications -n argocd` is the source of truth, not this doc)
-- `dhcpd-conf` → dhcpd ConfigMap
 
 Don't treat the app names above as exhaustive or use them as a rebuild checklist — see Step 7 for the actual verification command.
 
@@ -154,9 +153,6 @@ kubectl get applications -n argocd
 # No broken pods
 kubectl get pods -A | grep -v "Running\|Completed"
 
-# dhcpd serving backend VLAN
-kubectl logs -n infra deployment/dhcpd | grep Listening
-
 # Alloy collecting on every node, Loki ready
 kubectl get ds -n alloy
 kubectl get pods -n loki
@@ -179,10 +175,9 @@ kubectl get pods -n loki
 
 - [ ] Both nodes Ready (`kubectl get nodes`)
 - [ ] All ArgoCD apps Synced/Healthy
-- [ ] dhcpd listening on `LPF/end0/...`
 - [ ] pinode-01 joins cluster
 - [ ] pihole resolving DNS
-- [ ] log-archiver CronJob completes at 02:00
+- [ ] QNAP log shipper heartbeat reaching Loki (`{app="qnap-nfsd"}`)
 - [ ] Alloy DaemonSet ready on every node and Loki pod Running
 - [ ] ArgoCD UI accessible at https://192.168.2.10:30443
 

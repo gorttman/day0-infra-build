@@ -25,3 +25,26 @@
 - name: Include runtime-liveness tasks
   ansible.builtin.include_tasks:
     file: ensure_live.yml
+
+# Under --check the fix tasks above are raw, which Ansible skips, so a drifted
+# export would look like "nothing to do". The read-only probes DO run (they set
+# check_mode: false), so summarise what they found. Never runs for real: a real
+# run repairs the drift (and restarts NFS via the handler) in the tasks above.
+- name: Report export drift found by the read-only probes (check mode only)
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'DRIFT qnap_exports:' if qnap_exports_drift | length > 0 else 'NO DRIFT qnap_exports' }}
+      {{ qnap_exports_drift | join('; ') }}
+  vars:
+    qnap_exports_drift: >-
+      {{
+        (export_check.results | default([]) | selectattr('stdout', 'search', 'MISSING')
+           | map(attribute='item') | map(attribute='path') | map('regex_replace', '^', 'export missing from config: ') | list)
+        + (acl_check.results | default([]) | selectattr('stdout', 'search', 'MISMATCH')
+           | map(attribute='item') | map(attribute='path') | map('regex_replace', '^', 'AllowIP differs: ') | list)
+        + (squash_check.results | default([]) | selectattr('stdout', 'search', 'MISMATCH')
+           | map(attribute='item') | map(attribute='path') | map('regex_replace', '^', 'squash differs: ') | list)
+        + (qnap_nfs_acl | map(attribute='path') | reject('in', qnap_live_exports.stdout | default('')) | map('regex_replace', '^', 'not live on the running server: ') | list)
+      }}
+  when: ansible_check_mode
+  changed_when: qnap_exports_drift | length > 0

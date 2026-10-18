@@ -27,6 +27,7 @@
     label: "{{ item.path }}"
   register: export_check
   changed_when: false
+  check_mode: false   # read-only probe; must really run under --check
 
 - name: Insert Access line for missing exports
   ansible.builtin.raw: >-
