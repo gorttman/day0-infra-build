@@ -17,3 +17,20 @@ qnap_log_shipper_max_lines_per_run: 300
 qnap_log_shipper_files:
   - {tag: qnap-snapshot,       path: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.log}
   - {tag: qnap-stream-watcher, path: /share/CACHEDEV1_DATA/.scripts/qnap-stream-watcher.log}
+
+# Added 2026-10-19 at the request of the "Pi Cluster - General" session, to
+# compare QNAP server evidence with the k8smaster NFS client during the 2026-09-26
+# and 2026-10-03 wedges and the QNAP's unexplained reboots. All three carry
+# signal_type=host in Loki (13-month retention), see apps/alloy/alloy-values.yml.
+#
+# NEVER read /proc/kmsg here: the QNAP's own dd reads it to write /etc/logs/kmsg,
+# and reading consumes lines. dmesg does not.
+qnap_log_shipper_kernel_tag: qnap-kernel           # live dmesg, de-duplicated by kernel timestamp
+qnap_log_shipper_event_tag: qnap-event             # QTS event log (reboots, OOM kills, volume state)
+qnap_log_shipper_event_log: /etc/logs/event.log    # SQLite-style binary; parsed with strings
+qnap_log_shipper_nfsd_tag: qnap-nfsd               # one health line per minute
+# One-time, from the start of each file, so the pre-reboot evidence is kept.
+# Separate tag so it never mixes with live data. src= shows which boot it was.
+qnap_log_shipper_backfill_files:
+  - {tag: qnap-kernel-backfill, src: kmsg.1, path: /etc/logs/kmsg.1}
+  - {tag: qnap-kernel-backfill, src: kmsg.2, path: /etc/logs/kmsg.2}
