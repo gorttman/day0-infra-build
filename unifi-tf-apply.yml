@@ -15,7 +15,8 @@
 #
 # Run with:
 #   ansible-playbook unifi-tf-apply.yml                           # plan only
-#   ansible-playbook unifi-tf-apply.yml -e unifi_tf_do_apply=true  # plan + apply, refuses any destroy
+#   ansible-playbook unifi-tf-apply.yml -e unifi_tf_do_apply=true -e unifi_tf_approved_plan=<PLAN_SHA>
+#                                       # re-plans, applies only if the plan matches the reviewed PLAN_SHA; refuses any destroy
 
 - name: Apply UniFi Terraform config (plan always; apply only when explicitly requested)
   hosts: k8smaster

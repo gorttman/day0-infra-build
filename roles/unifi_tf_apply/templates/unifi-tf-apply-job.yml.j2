@@ -25,6 +25,12 @@ spec:
               # (day1-foundation HISTORY.md #5, now HISTORY.md in this
               # role) - preserved exactly, just triggered by a human
               # running this playbook instead of an automated sync.
+              # Fingerprint of the rendered plan, so an apply run can prove it is
+              # applying exactly the plan that was reviewed (same gate as the
+              # cloudflare_tf_apply role).
+              plan_sha=$(terraform show -no-color tfplan | sha256sum | cut -c1-16)
+              echo "PLAN_SHA=${plan_sha}"
+
               destroy_count=$(sed -n 's/^Plan: .*, \([0-9]\{1,\}\) to destroy\..*/\1/p' plan.txt)
               destroy_count=${destroy_count:-0}
               if [ "${destroy_count}" -gt 0 ] && [ "${UNIFI_TF_ALLOW_DESTROY:-false}" != "true" ]; then
@@ -35,11 +41,18 @@ spec:
               fi
 
               if [ "${UNIFI_TF_DO_APPLY:-false}" != "true" ]; then
-                echo "=== PLAN-ONLY RUN - re-run with -e unifi_tf_do_apply=true to actually apply ==="
+                echo "=== PLAN-ONLY RUN - ==="
                 exit 0
               fi
 
+              if [ "${UNIFI_TF_APPROVED_PLAN:-}" != "${plan_sha}" ]; then
+                echo "REFUSING TO APPLY: this plan is ${plan_sha}, you approved '${UNIFI_TF_APPROVED_PLAN:-}'." >&2
+                echo "Something changed since you reviewed it. Re-run plan-only and review again." >&2
+                exit 1
+              fi
+
               terraform apply -input=false tfplan
+              echo "=== APPLIED ${plan_sha} ==="
           envFrom:
             - secretRef:
                 name: unifi-tf-secrets
@@ -48,6 +61,8 @@ spec:
               value: "{{ unifi_tf_allow_destroy | string | lower }}"
             - name: UNIFI_TF_DO_APPLY
               value: "{{ unifi_tf_do_apply | string | lower }}"
+            - name: UNIFI_TF_APPROVED_PLAN
+              value: "{{ unifi_tf_approved_plan }}"
           volumeMounts:
             - name: tf-config-ro
               mountPath: /workspace-ro

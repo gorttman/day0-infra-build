@@ -111,6 +111,8 @@
     kind: Job
     name: "{{ cloudflare_tf_job_name }}"
     namespace: "{{ cloudflare_tf_namespace }}"
+    delete_options:
+      propagationPolicy: Background
   changed_when: false
 
 - name: Fail if the Job failed (destroy guard, plan mismatch, or a real error)

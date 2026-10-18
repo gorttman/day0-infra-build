@@ -81,6 +81,11 @@
   ansible.builtin.debug:
     msg: "{{ unifi_tf_job_logs.stdout_lines }}"
 
+- name: Work out the plan fingerprint
+  ansible.builtin.set_fact:
+    unifi_tf_plan_sha: >-
+      {{ unifi_tf_job_logs.stdout_lines | select('match', '^PLAN_SHA=') | map('regex_replace', '^PLAN_SHA=', '') | first | default('') }}
+
 - name: Clean up the Job and scratch ConfigMap
   ansible.builtin.command:
     cmd: "{{ item }}"
@@ -93,3 +98,11 @@
   ansible.builtin.fail:
     msg: "{{ unifi_tf_job_name }} failed - see the plan/apply output above for why."
   when: unifi_tf_job_failed | bool
+
+- name: How to apply exactly this plan
+  ansible.builtin.debug:
+    msg: >-
+      Plan fingerprint {{ unifi_tf_plan_sha }}. To apply exactly this:
+      ansible-playbook unifi-tf-apply.yml -e unifi_tf_do_apply=true
+      -e unifi_tf_approved_plan={{ unifi_tf_plan_sha }}
+  when: not (unifi_tf_do_apply | bool)
