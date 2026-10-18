@@ -1,5 +1,12 @@
 # unifi-tf
 
+> **2026-10-18:** Terraform for this stack now runs on the control host via
+> `roles/tf_run`, not as an in-cluster Job, and state is a local file (with a
+> vault-encrypted copy in `state/`), not Postgres. Where this README mentions
+> Jobs, ConfigMaps, sealed secrets or the Postgres backend, it describes the
+> earlier design. See `roles/tf_run/README.md`.
+
+
 Manages the UniFi Dream Machine's config as Terraform, applied
 in-cluster by an Argo CD Sync-hook Job — the same pattern
 `apps/cloudflare-tf` uses, applied to the household network instead of

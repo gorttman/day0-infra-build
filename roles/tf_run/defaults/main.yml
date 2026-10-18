@@ -1,0 +1,18 @@
+---
+# Generic Terraform runner used by cloudflare_tf_apply and unifi_tf_apply.
+# Runs terraform on the control host (k8smaster) - no Kubernetes involved, so
+# it works on day 0 before k3s exists and keeps working when k3s is down.
+#
+# Callers set: tf_run_stack, tf_run_src (dir of .tf files), and optionally the
+# three apply controls below.
+tf_run_do_apply: false
+tf_run_approved_plan: ""
+tf_run_allow_destroy: false
+
+tf_run_version: "1.9.8"
+tf_run_zip_sha256: "f85868798834558239f6148834884008f2722548f84034c9b0f62934b2d73ebb"  # linux_arm64
+tf_run_root: /var/lib/infra-tf
+tf_run_secrets_file: "{{ playbook_dir }}/variables/common/tf-secrets.yml"
+# Vault-encrypted copy of each stack's state, kept in the repo so a rebuilt
+# host can restore it. Refreshed after every apply.
+tf_run_state_backup_dir: "{{ playbook_dir }}/state"

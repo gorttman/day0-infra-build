@@ -1,0 +1,37 @@
+---
+- name: Make sure the repo state directory exists
+  ansible.builtin.file:
+    path: "{{ tf_run_state_backup_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Compare the live state with the vaulted copy
+  ansible.builtin.shell: |
+    set -o pipefail
+    live=$(sha256sum < {{ tf_run_root }}/{{ tf_run_stack }}/terraform.tfstate)
+    old=$(ansible-vault view {{ tf_run_state_backup_dir }}/{{ tf_run_stack }}.tfstate.enc 2>/dev/null | sha256sum || true)
+    [ "$live" = "$old" ] && echo same || echo differs
+  args:
+    executable: /bin/bash
+    chdir: "{{ playbook_dir }}"
+  register: tf_run_state_cmp
+  changed_when: false
+  no_log: true
+
+- name: Write the vaulted state copy
+  ansible.builtin.command:
+    cmd: >-
+      ansible-vault encrypt --output {{ tf_run_state_backup_dir }}/{{ tf_run_stack }}.tfstate.enc
+      {{ tf_run_root }}/{{ tf_run_stack }}/terraform.tfstate
+  args:
+    chdir: "{{ playbook_dir }}"
+  when: tf_run_state_cmp.stdout == 'differs'
+  no_log: true
+
+- name: Hand the vaulted copy back to the invoking user
+  ansible.builtin.file:
+    path: "{{ tf_run_state_backup_dir }}/{{ tf_run_stack }}.tfstate.enc"
+    owner: "{{ lookup('ansible.builtin.env', 'USER') | default('root', true) }}"
+    mode: "0644"  # already vault-encrypted; readable so the repo owner can commit it even after a root-run drift check

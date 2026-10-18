@@ -1,0 +1,116 @@
+---
+# Idempotent by construction: installing, directories, synced config and the
+# state restore all report changed only when something actually differs. The
+# terraform run itself is a run, not state, and reports through the final
+# "Applied" task only.
+- name: Install the pinned terraform binary
+  ansible.builtin.include_tasks: install.yml
+
+- name: Load the vaulted provider secrets
+  ansible.builtin.include_vars:
+    file: "{{ tf_run_secrets_file }}"
+    name: tf_run_vault
+  no_log: true
+
+- name: Ensure the stack directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ tf_run_root }}"
+    - "{{ tf_run_root }}/plugin-cache"
+    - "{{ tf_run_root }}/{{ tf_run_stack }}"
+
+- name: Check for the live state file
+  ansible.builtin.stat:
+    path: "{{ tf_run_root }}/{{ tf_run_stack }}/terraform.tfstate"
+  register: tf_run_state_stat
+
+- name: Check for the vaulted state copy in the repo
+  ansible.builtin.stat:
+    path: "{{ tf_run_state_backup_dir }}/{{ tf_run_stack }}.tfstate.enc"
+  register: tf_run_backup_stat
+  delegate_to: localhost
+  become: false
+
+# Rebuild path: a fresh host has no state, the repo copy brings it back.
+- name: Restore state from the vaulted copy when the host has none
+  ansible.builtin.command:
+    cmd: >-
+      ansible-vault decrypt --output {{ tf_run_root }}/{{ tf_run_stack }}/terraform.tfstate
+      {{ tf_run_state_backup_dir }}/{{ tf_run_stack }}.tfstate.enc
+  args:
+    chdir: "{{ playbook_dir }}"
+  when: not tf_run_state_stat.stat.exists and tf_run_backup_stat.stat.exists
+  no_log: true
+
+- name: Fresh work directory for this run
+  ansible.builtin.file:
+    path: "{{ tf_run_root }}/{{ tf_run_stack }}/work"
+    state: "{{ item }}"
+    mode: "0700"
+  loop: [absent, directory]
+  changed_when: false
+
+- name: Copy the terraform files in
+  ansible.builtin.copy:
+    src: "{{ tf_run_src }}/"
+    dest: "{{ tf_run_root }}/{{ tf_run_stack }}/work/"
+    mode: "0600"
+  changed_when: false
+
+- name: Plan (and apply only when approved)
+  ansible.builtin.command:
+    cmd: /bin/bash {{ role_path }}/files/tf-run.sh
+  environment: >-
+    {{ tf_run_vault.tf_secrets[tf_run_stack] | combine({
+      'PATH': '/usr/local/bin:/usr/bin:/bin',
+      'HOME': '/root',
+      'TF_PLUGIN_CACHE_DIR': tf_run_root ~ '/plugin-cache',
+      'TF_RUN_STACK': tf_run_stack,
+      'TF_RUN_WORK': tf_run_root ~ '/' ~ tf_run_stack ~ '/work',
+      'TF_RUN_STATE': tf_run_root ~ '/' ~ tf_run_stack ~ '/terraform.tfstate',
+      'TF_RUN_DO_APPLY': tf_run_do_apply | string | lower,
+      'TF_RUN_APPROVED_PLAN': tf_run_approved_plan,
+      'TF_RUN_ALLOW_DESTROY': tf_run_allow_destroy | string | lower,
+    }) }}
+  register: tf_run_result
+  failed_when: false
+  changed_when: false
+
+- name: Show the plan / apply output
+  ansible.builtin.debug:
+    msg: "{{ tf_run_result.stdout_lines + (tf_run_result.stderr_lines | default([])) }}"
+
+- name: Work out what happened
+  ansible.builtin.set_fact:
+    tf_run_plan_sha: >-
+      {{ tf_run_result.stdout_lines | select('match', '^PLAN_SHA=') | map('regex_replace', '^PLAN_SHA=', '') | first | default('') }}
+    tf_run_applied: "{{ tf_run_result.stdout_lines | select('match', '^=== APPLIED ') | list | length > 0 }}"
+
+# Keep the vaulted copy current on every run (a rebuilt host restores from
+# it) - but only rewrite it when the state really differs, since vault output
+# is salted and would otherwise change every time.
+- name: Refresh the vaulted state copy
+  ansible.builtin.include_tasks: backup_state.yml
+
+- name: Fail if terraform failed (destroy guard, plan mismatch, or a real error)
+  ansible.builtin.fail:
+    msg: "{{ tf_run_stack }} terraform run failed - see the output above for why."
+  when: tf_run_result.rc != 0
+
+- name: How to apply exactly this plan
+  ansible.builtin.debug:
+    msg: >-
+      Plan fingerprint {{ tf_run_plan_sha }}. To apply exactly this:
+      ansible-playbook {{ tf_run_stack }}-tf-apply.yml -e {{ tf_run_stack }}_tf_do_apply=true
+      -e {{ tf_run_stack }}_tf_approved_plan={{ tf_run_plan_sha }}
+  when: not (tf_run_do_apply | bool)
+
+- name: Report whether anything was applied
+  ansible.builtin.debug:
+    msg: "{{ 'Applied plan ' ~ tf_run_plan_sha if tf_run_applied else 'Nothing applied.' }}"
+  changed_when: tf_run_applied | bool

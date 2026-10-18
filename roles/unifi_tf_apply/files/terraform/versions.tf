@@ -8,12 +8,11 @@ terraform {
     }
   }
 
-  # State backend: shared Postgres instance (postgres.postgres.svc.cluster.local),
-  # database "unifi_tf", owned by role "unifi_tf" - see README.md, same
-  # pattern as apps/cloudflare-tf. conn_str is partial config, supplied at
-  # `terraform init` via -backend-config from the TF_BACKEND_PG_CONN_STR
-  # secret, never committed here.
-  backend "pg" {}
+  # State backend: a local file, path supplied at init by the tf_run role
+  # (-backend-config="path=..."). Lives at /var/lib/infra-tf/unifi/ on the
+  # control host, with a vault-encrypted copy in day0-infra-build/state/.
+  # Deliberately not in the cluster: this stack must work before k3s exists.
+  backend "local" {}
 }
 
 provider "unifi" {

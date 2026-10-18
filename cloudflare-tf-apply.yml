@@ -21,6 +21,7 @@
 
 - name: Plan (and optionally apply) the Cloudflare Terraform config
   hosts: k8smaster
+  become: true
   gather_facts: false
   tags:
     - manage_cloudflare_tf

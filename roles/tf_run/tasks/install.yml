@@ -1,0 +1,27 @@
+---
+- name: Check the installed terraform version
+  ansible.builtin.command:
+    cmd: /usr/local/bin/terraform version
+  register: tf_run_installed
+  failed_when: false
+  changed_when: false
+
+- name: Download and install the pinned terraform
+  when: "('Terraform v' ~ tf_run_version) not in tf_run_installed.stdout"
+  block:
+    - name: Download the release zip (checksum pinned)
+      ansible.builtin.get_url:
+        url: "https://releases.hashicorp.com/terraform/{{ tf_run_version }}/terraform_{{ tf_run_version }}_linux_arm64.zip"
+        dest: "/tmp/terraform_{{ tf_run_version }}.zip"
+        checksum: "sha256:{{ tf_run_zip_sha256 }}"
+        mode: "0600"
+
+    - name: Unpack the binary
+      ansible.builtin.unarchive:
+        src: "/tmp/terraform_{{ tf_run_version }}.zip"
+        dest: /usr/local/bin
+        remote_src: true
+        mode: "0755"
+        owner: root
+        group: root
+        include: [terraform]

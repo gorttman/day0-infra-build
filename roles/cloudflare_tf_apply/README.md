@@ -1,5 +1,12 @@
 # cloudflare-tf
 
+> **2026-10-18:** Terraform for this stack now runs on the control host via
+> `roles/tf_run`, not as an in-cluster Job, and state is a local file (with a
+> vault-encrypted copy in `state/`), not Postgres. Where this README mentions
+> Jobs, ConfigMaps, sealed secrets or the Postgres backend, it describes the
+> earlier design. See `roles/tf_run/README.md`.
+
+
 > **Relocated 2026-10-18** from `day1-foundation/apps/cloudflare-tf`
 > (ArgoCD auto-apply on push) to this Ansible role, plan-first. A push now
 > changes nothing; run `cloudflare-tf-apply.yml` (plan), then re-run with
