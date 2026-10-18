@@ -87,3 +87,8 @@ qnap_cron_jobs:
   - name: qnap-stream-watcher
     schedule: "*/{{ qnap_stream_watcher_interval_minutes }} * * * *"
     command: "{{ qnap_stream_watcher_script_path }} >> /share/CACHEDEV1_DATA/.scripts/qnap-stream-watcher.log 2>&1"
+  # Added 2026-10-19: ship the QNAP script logs to Loki. See
+  # variables/play/qnap_log_shipper.yml and roles/qnap_log_shipper.
+  - name: qnap-log-shipper
+    schedule: "* * * * *"
+    command: "{{ qnap_log_shipper_script_path }} >/dev/null 2>&1"

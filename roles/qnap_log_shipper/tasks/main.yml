@@ -1,0 +1,22 @@
+################################################################################
+# FILE: roles/qnap_log_shipper/tasks/main.yml
+################################################################################
+---
+# No Python on the QNAP, so the file/copy modules cannot run. The installer is
+# rendered here and run there with the script module (also Python-free); the
+# shipper itself is pure bash 3.2 + BusyBox, sending UDP via bash's /dev/udp.
+- name: Render the installer on the control host
+  ansible.builtin.template:
+    src: install-qnap-log-shipper.sh.j2
+    dest: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/install-qnap-log-shipper.sh"
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Install the log shipper script on the QNAP
+  ansible.builtin.script: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/install-qnap-log-shipper.sh"
+  args:
+    executable: /bin/bash
+  register: qnap_log_shipper_push
+  changed_when: "'UPDATED' in qnap_log_shipper_push.stdout"

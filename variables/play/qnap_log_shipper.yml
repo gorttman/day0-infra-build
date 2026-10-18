@@ -1,0 +1,19 @@
+################################################################################
+# FILE: variables/play/qnap_log_shipper.yml
+################################################################################
+---
+# Added 2026-10-19. The QNAP has no log collector, so its own scripts logged
+# to local files nobody read. This ships new lines of those files to the
+# cluster's Alloy syslog receiver (day2-services apps/alloy: UDP 5514 on the
+# alloy-syslog VIP -> Loki, namespace=qnap, app=<tag below>).
+qnap_log_shipper_script_path: /share/CACHEDEV1_DATA/.scripts/qnap-log-shipper.sh
+qnap_log_shipper_state_dir: /share/CACHEDEV1_DATA/.scripts/.log-shipper-state
+qnap_log_shipper_target_host: 192.168.20.231
+qnap_log_shipper_target_port: 5514
+# Per file per run; the remainder goes out on the next run, nothing is dropped.
+qnap_log_shipper_max_lines_per_run: 300
+
+# tag becomes the Loki "app" label. Add a file here to start shipping it.
+qnap_log_shipper_files:
+  - {tag: qnap-snapshot,       path: /share/CACHEDEV1_DATA/.scripts/qnap-snapshot.log}
+  - {tag: qnap-stream-watcher, path: /share/CACHEDEV1_DATA/.scripts/qnap-stream-watcher.log}

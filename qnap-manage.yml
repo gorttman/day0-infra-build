@@ -58,6 +58,7 @@
     - variables/play/qnap_snapshot.yml
     - variables/play/qnap_stream_watcher.yml
     - variables/play/qnap_backup_cron.yml
+    - variables/play/qnap_log_shipper.yml
 
   tasks:
     - name: Ensure backup cron entries exist in the persistent crontab
@@ -131,3 +132,20 @@
         name: qnap_stream_watcher
       vars:
         jellyfin_api_key: "{{ jellyfin_api_key_b64.stdout | b64decode }}"
+
+# Added 2026-10-19. Ships the QNAP's own script logs to Loki through Alloy's
+# syslog receiver (day2-services apps/alloy). The cron entry that runs it is
+# in variables/play/qnap_backup_cron.yml (play above).
+- name: QNAP log shipper
+  hosts: qnap
+  gather_facts: false
+  tags:
+    - manage_qnap_log_shipper
+  vars_files:
+    - variables/common/set_environment.yml
+    - variables/play/qnap_log_shipper.yml
+
+  tasks:
+    - name: Push the log shipper script
+      ansible.builtin.include_role:
+        name: qnap_log_shipper
