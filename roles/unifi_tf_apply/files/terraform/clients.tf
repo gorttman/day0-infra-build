@@ -180,6 +180,10 @@ resource "unifi_user" "fetchbox_pantry" {
   blocked         = false
 }
 
+# Pinned live (not in Terraform; the provider schema has no fixed-AP field, so
+# plans do not see it): fixed_ap_enabled=true, fixed_ap_mac=28:70:4e:86:ca:19
+# (In-Wall Lounge), set 2026-10-19. The TV had sat on the gateway radio at
+# -62 dBm with ~8% retries for 12 h while the Lounge AP is 400 mm away.
 resource "unifi_user" "lg_tv_family_room" {
   mac             = "a8:a2:37:81:80:ea"
   name            = "LG-TV Family Room"
