@@ -8,6 +8,10 @@ node_iot_leg:
   vlan_id: 40
   parent: eth0
   address: 192.168.40.12/24
+# k3s role: server runs the control plane (k8smaster); agent runs k3s-agent only.
+k3s_role: agent
+# This node's own Trusted VLAN20 address (k3s node-ip, static IP).
+node_trusted_ip: 192.168.20.12
 # sshd socket bound to the Trusted address only ("" = leave sshd alone)
 node_ssh_listen_address: 192.168.20.12
 # host firewall table guarding the IoT leg

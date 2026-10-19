@@ -71,10 +71,13 @@
     wifi_conn_name: "{{ (active_connections.stdout_lines
       | select('search', ':802-11-wireless$')
       | map('regex_replace', ':802-11-wireless$', '')
-      | list) | first | default(omit) }}"
+      | list) | first | default('') }}"
 
+# Empty when the node has no active wifi connection (all three nodes are
+# wired now). default(omit) inside set_fact errors with "No key/value pairs
+# provided", which aborted the whole play before the VLAN and k3s roles.
 - name: Ensure Pi-hole is the primary DNS server on the wireless connection
-  when: wifi_conn_name is defined
+  when: wifi_conn_name | length > 0
   become: true
   block:
     - name: Set DNS servers on the wireless connection
@@ -103,25 +106,26 @@
 # Pi-hole to do it. Pi-hole stays first, so split-horizon still wins
 # whenever it is up.
 #
-# Live note: pinode-01's wired connection is NetworkManager's default
-# "Wired connection 1", not backend-vlan - this role has never run there, and
-# backend_vlan_ip below is still the pre-VLAN20 192.168.1.10. The fallbacks
-# were applied to that connection by hand on 2026-09-03. Reconciling this
-# role with VLAN20 is its own job.
+# Only for hosts whose wired profile is backend-vlan (k8smaster, where
+# node_primary_conn is ""). The workers' "Wired connection 1" profile is
+# owned by roles/node_vlan_legs. Values match the live profile (VLAN20,
+# 2026-10-20): static address with gateway, default route allowed.
 - name: Configure static IP on end0 for backend VLAN
+  when: node_primary_conn | length == 0
   community.general.nmcli:
     conn_name: backend-vlan
     ifname: end0
     type: ethernet
-    ip4: "{{ backend_vlan_ip }}/{{ backend_vlan_prefix }}"
+    ip4: "{{ node_trusted_ip }}/{{ backend_vlan_prefix }}"
+    gw4: "{{ backend_vlan_gateway }}"
     dns4: "{{ wifi_mgmt_dns }}"
-    dns4_ignore_auto: true
-    never_default4: true
+    dns4_ignore_auto: false
     autoconnect: true
     state: present
   become: true
 
 - name: Bring up backend-vlan connection
+  when: node_primary_conn | length == 0
   ansible.builtin.command: nmcli connection up backend-vlan
   become: true
   register: nmcli_up

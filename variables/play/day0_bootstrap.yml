@@ -38,8 +38,12 @@ config_repos:
     path: apps
     repo: https://github.com/gorttman/dns-conf.git
 
-backend_vlan_ip: "192.168.1.10"
-backend_vlan_prefix: "27"
+# Trusted VLAN20 (since 2026-08-30). backend_vlan_ip is the address of the
+# k3s server (k8smaster); each node's OWN address is node_trusted_ip in
+# variables/cli/host_vars/<node>.yml.
+backend_vlan_ip: "192.168.20.10"
+backend_vlan_prefix: "24"
+backend_vlan_gateway: "192.168.20.1"
 
 # Both Pi-holes (split-horizon DNS for *.i3sec.com.au) first, then
 # 1.1.1.2 as the last resort - not a replacement, so a node still

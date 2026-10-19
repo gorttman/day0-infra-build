@@ -1,5 +1,11 @@
 ---
+# Everything below up to kubeseal is k3s SERVER configuration. Workers run
+# k3s-agent, whose config.yaml comes from the node overlay/golden image and
+# must not get server keys (a bad agent config.yaml has broken k3s-agent
+# before). k3s_role is set per node in variables/cli/host_vars.
 - name: Configure k3s to write kubeconfig with relaxed permissions
+  when: k3s_role | default('server') == 'server'
+  register: k3s_kubeconfig_mode
   ansible.builtin.lineinfile:
     path: /etc/rancher/k3s/config.yaml
     regexp: '^write-kubeconfig-mode:'
@@ -27,24 +33,33 @@
 # self-correct to match the new node-ip (confirmed live) - a
 # `kubectl annotate node <name> flannel.alpha.coreos.com/public-ip=<ip>
 # --overwrite` is required alongside this change, every time.
+# 192.168.20.5 is reserved for a future kube-vip control-plane address
+# (added to the cert SANs 2026-08-30). Nothing holds it today: that needs
+# three control-plane nodes, which this cluster does not have.
 - name: Configure k3s advertise-address, tls-san, and node-ip for the management NIC
+  when: k3s_role | default('server') == 'server'
+  register: k3s_advertise_block
   ansible.builtin.blockinfile:
     path: /etc/rancher/k3s/config.yaml
     marker: "# {mark} ANSIBLE MANAGED BLOCK - management NIC advertise address"
     block: |
       tls-san:
-        - {{ backend_vlan_ip }}
-      advertise-address: {{ backend_vlan_ip }}
-      node-ip: {{ backend_vlan_ip }}
+        - {{ node_trusted_ip }}
+        - 192.168.20.5
+      advertise-address: {{ node_trusted_ip }}
+      node-ip: {{ node_trusted_ip }}
   become: true
 
+# Only restart when the config actually changed, so a re-run is a no-op.
 - name: Restart k3s to apply config changes
+  when: k3s_kubeconfig_mode.changed or k3s_advertise_block.changed
   ansible.builtin.service:
     name: k3s
     state: restarted
   become: true
 
 - name: Wait for k3s API to come back after restart
+  when: k3s_kubeconfig_mode.changed or k3s_advertise_block.changed
   ansible.builtin.wait_for:
     port: 6443
     host: 127.0.0.1
@@ -57,10 +72,11 @@
 # alone, this reproduces the exact stale-FDB bug found on pinode-01 the
 # same night, just self-inflicted by this role instead of inherited.
 - name: Correct flannel's public-ip annotation to match the new node-ip
+  when: k3s_kubeconfig_mode.changed or k3s_advertise_block.changed
   ansible.builtin.command:
     cmd: >-
       kubectl annotate node {{ ansible_hostname }}
-      flannel.alpha.coreos.com/public-ip={{ backend_vlan_ip }} --overwrite
+      flannel.alpha.coreos.com/public-ip={{ node_trusted_ip }} --overwrite
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   become: true
