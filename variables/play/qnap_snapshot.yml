@@ -97,6 +97,11 @@ qnap_snapshot_sources:
     path: /share/CACHEDEV1_DATA/immicc
   - name: paperless
     path: /share/CACHEDEV1_DATA/paperless
+  # Added 2026-10-20: the QNAP clean-up left /Documents (i3sec archive,
+  # data-documents, icloud-leftovers, unsorted...) as the only copy of
+  # those files; it was in no snapshot. Plain generational source.
+  - name: documents
+    path: /share/CACHEDEV1_DATA/Documents
   - name: inbox
     path: /share/CACHEDEV1_DATA/inbox
   # mode: mirror since 2026-10-03 - the other source flagged as a

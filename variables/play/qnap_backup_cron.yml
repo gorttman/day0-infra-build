@@ -41,6 +41,10 @@ qnap_crontab_file: /etc/config/crontab
 # changing its name requires manually removing the old line from the
 # live crontab first (confirmed needed 2026-10-03, see HISTORY.md #5).
 qnap_cron_jobs:
+  # Added 2026-10-20: /Documents, 20 minutes before the first stable source.
+  - name: qnap-data-snapshot-documents-v2
+    schedule: "39 23 * * *"
+    command: "{{ qnap_snapshot_script_path }} documents >> {{ qnap_snapshot_log_file }} 2>&1"
   - name: qnap-data-snapshot-books-v2
     schedule: "59 23 * * *"
     command: "{{ qnap_snapshot_script_path }} books >> {{ qnap_snapshot_log_file }} 2>&1"
