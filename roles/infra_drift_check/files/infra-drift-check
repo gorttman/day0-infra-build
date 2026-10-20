@@ -49,7 +49,14 @@ done
 # QNAP NFS exports: check mode runs only read-only probes (grep/exportfs -v) over
 # ssh - a few tiny commands, nothing that writes or restarts NFS. Prints
 # "DRIFT qnap_exports: ..." or "NO DRIFT qnap_exports".
-out=$(ansible-playbook qnap-manage.yml --check --tags manage_qnap_exports 2>&1)
+# The QNAP ssh key and known_hosts belong to the repo owner, not root (the
+# inventory uses ~/.ssh/qnap_ansible_ed25519), so run this one as that user.
+owner=$(stat -c %U "$REPO")
+if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then
+  out=$(runuser -u "$owner" -- env HOME="$(getent passwd "$owner" | cut -d: -f6)" ansible-playbook qnap-manage.yml --check --tags manage_qnap_exports 2>&1)
+else
+  out=$(ansible-playbook qnap-manage.yml --check --tags manage_qnap_exports 2>&1)
+fi
 rc=$?
 clean=$(printf '%s\n' "$out" | tr -d '\\')
 check_ok=0
