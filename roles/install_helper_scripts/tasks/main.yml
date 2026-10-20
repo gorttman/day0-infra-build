@@ -1,8 +1,9 @@
 ---
-- name: Copy the backup script to local fs
+- name: Copy the helper scripts to local fs
   ansible.builtin.include_tasks:
     file: install_backup_sealed_secrets.yml
 
-- name: Coinfigure cron
-  include_tasks:
-    file: install_cron_backup_sealed_secrets.yml
+# The every-5-minutes sealed-secrets key backup cron was removed 2026-10-21:
+# the host script is retired and the in-cluster CronJob sealed-secrets-backup
+# (kube-system, 04:00 daily, day0-bootstrap) does the job. See
+# docs/rebuild-runbook.md Step 2.
