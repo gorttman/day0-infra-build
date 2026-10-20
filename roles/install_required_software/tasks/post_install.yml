@@ -83,6 +83,7 @@
   changed_when: true
 
 - name: Extract kubeseal binary
+  when: not kubeseal_bin.stat.exists and not ansible_check_mode
   unarchive:
     src: /tmp/kubeseal.tar.gz
     dest: /usr/local/bin/
@@ -92,6 +93,7 @@
   become_user: root
 
 - name: Ensure kubeseal is executable
+  when: kubeseal_bin.stat.exists or not ansible_check_mode
   file:
     path: /usr/local/bin/kubeseal
     mode: '0755'
