@@ -1,5 +1,17 @@
 ---
+# Scratch dir under /tmp that the rendered manifest goes into. Created even in
+# check mode (harmless) so the later check-mode tasks can read the file;
+# the shared_workspace role is a separate repo, so this lives here.
+- name: Ensure the staging directory exists for the rendered manifest
+  ansible.builtin.file:
+    path: "{{ staging_dir }}"
+    state: directory
+    mode: '0755'
+  check_mode: false
+
 - name: Render bootstrap Application manifest
   ansible.builtin.template:
     src: bootstrap.yaml.j2
     dest: "{{ bootstrap_app_path }}"
+  # Scratch file in the staging dir; later check-mode tasks read it.
+  check_mode: false

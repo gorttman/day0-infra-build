@@ -36,15 +36,20 @@
       ansible.builtin.include_role:
         name: install_required_software
 
+    # ArgoCD, sealed-secrets backups and the admin credentials live on the
+    # k3s server only (k3s_role in host_vars); the workers are agents.
     - name: Apply ArgoCD bootstrap Application
+      when: k3s_role | default('server') == 'server'
       ansible.builtin.include_role:
         name: apply_bootstrap
 
     - name: Install sealed secrets backup
+      when: k3s_role | default('server') == 'server'
       ansible.builtin.include_role:
         name: install_helper_scripts
 
     - name: Get and display day 0 credentials
+      when: k3s_role | default('server') == 'server'
       ansible.builtin.include_role:
         name: credentials_out
 

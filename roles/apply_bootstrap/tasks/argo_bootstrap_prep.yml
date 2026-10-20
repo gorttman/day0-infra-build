@@ -9,7 +9,23 @@
       metadata:
         name: argocd
 
+# Skip the upstream install when ArgoCD is already running at the pinned
+# version. Re-applying install.yaml over a live ArgoCD strips live settings
+# that are not in it (server.insecure in argocd-cmd-params-cm, the
+# repo-server probe tuning) and the UI behind the HTTP ingress would break.
+# Checked with kubectl diff 2026-10-21.
+- name: Look up the running argocd-server
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    kind: Deployment
+    namespace: argocd
+    name: argocd-server
+  register: argocd_server_live
+
 - name: Install ArgoCD core manifests
+  when: >-
+    argocd_server_live.resources | length == 0 or
+    (argocd_version not in argocd_server_live.resources[0].spec.template.spec.containers[0].image)
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     namespace: argocd
