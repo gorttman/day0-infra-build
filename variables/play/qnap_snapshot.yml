@@ -40,6 +40,12 @@ qnap_snapshot_throttle_recheck_seconds: 120
 # of the nightly sources. See roles/qnap_snapshot/HISTORY.md #8.
 qnap_snapshot_mirror_max_hours: 7
 
+# Mirror deletions (2026-10-30): files removed from a mirrored source are moved
+# to mirror-deleted/<source>/<date> on the backup disk and pruned after this
+# many days; one run refuses to delete more than max_delete files.
+qnap_snapshot_mirror_deleted_keep_days: 30
+qnap_snapshot_mirror_max_delete: 5000
+
 # Source list finalized 2026-08-10 (see day2-services
 # project_qnap_backup_design memory for the full reasoning trail).
 # Deliberately excludes: /backup itself (it's the destination disk,

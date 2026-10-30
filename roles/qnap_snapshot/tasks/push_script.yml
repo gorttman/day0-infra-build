@@ -51,6 +51,7 @@
     WEEKLY_DIR="$BACKUP_ROOT/weekly"
     MONTHLY_DIR="$BACKUP_ROOT/monthly"
     MIRROR_DIR="$BACKUP_ROOT/mirror"
+    MIRROR_DELETED_DIR="$BACKUP_ROOT/mirror-deleted"
 
     DATE=$(date +%F)
     DOW=$(date +%u)          # 1=Mon .. 7=Sun
@@ -150,6 +151,17 @@
       prune_generations "$DAILY_DIR" "$DAILY_KEEP" "$protected"
       prune_generations "$WEEKLY_DIR" "$WEEKLY_KEEP"
       prune_generations "$MONTHLY_DIR" "$MONTHLY_KEEP"
+      # Files the mirrors removed (see the mirror block): drop day folders
+      # older than the retention window. Dates come from the folder names.
+      cutoff=$(( $(date +%s) - {{ qnap_snapshot_mirror_deleted_keep_days }} * 86400 ))
+      for sd in "$MIRROR_DELETED_DIR"/*/*/; do
+        [ -d "$sd" ] || continue
+        sd_epoch=$(date -d "$(basename "$sd")" +%s 2>/dev/null || echo 0)
+        if [ "$sd_epoch" -gt 0 ] && [ "$sd_epoch" -lt "$cutoff" ]; then
+          echo "[*] Prune removes mirror-deleted/${sd#"$MIRROR_DELETED_DIR"/}"
+          rm -rf "${sd:?}"
+        fi
+      done
       echo "[*] Prune complete: $(date)"
       exit 0
     fi
@@ -251,35 +263,40 @@
 
     mkdir -p "$DAILY_DIR" "$WEEKLY_DIR" "$MONTHLY_DIR"
 
-    # Interim mirror mode, added 2026-10-03 (HISTORY.md #6) for
-    # sources that are actively migrating/churning right now (photos,
-    # media) - the generational --link-dest diff below assumes the
-    # source stays roughly stable between runs, which is not true
-    # mid-migration and is what overloaded the box on 2026-09-18/21.
-    # A flat, persistent, additive-only mirror sidesteps that
-    # entirely: no per-run hardlink-tree rebuild, no deletes (so a
-    # mid-migration rename/move never removes the only copy on the
-    # backup disk before it is re-landed), one fixed destination
-    # that just keeps catching up. --stats on every call prints how
-    # many files moved this run - once that number stays near zero
-    # for a few nights, the source has caught up and mode: mirror
-    # can come back out of variables/play/qnap_snapshot.yml for that
-    # source, returning it to normal generational backup with full
-    # retention.
+    # Mirror mode, added 2026-10-03 as an interim for sources that were
+    # actively migrating (photos, media): the generational --link-dest diff
+    # below assumes the source stays roughly stable between runs, which was
+    # not true mid-migration and is what overloaded the box on 2026-09-18/21.
+    # A flat, persistent mirror sidesteps that: no per-run hardlink-tree
+    # rebuild, one fixed destination that just keeps catching up.
+    #
+    # Deletes added 2026-10-30. It started additive-only so a mid-migration
+    # rename/move could never remove the only copy on the backup disk, but
+    # additive-only grows forever and keeps every file ever deleted or moved.
+    # Now the mirror follows the source, with two safety nets:
+    #   --backup --backup-dir: a file removed or overwritten on the source goes
+    #     to mirror-deleted/<source>/<date> on the same disk (a rename, no extra
+    #     copy) and is pruned after {{ qnap_snapshot_mirror_deleted_keep_days }} days by --prune, so a mistaken
+    #     delete can be undone for a month.
+    #   --max-delete: rsync refuses to remove more than {{ qnap_snapshot_mirror_max_delete }} files in a run, so a
+    #     missing mount or an emptied source cannot wipe the mirror. The run then
+    #     fails, skips the .last-run marker below, and goes stale on the page.
     if [ "$SYNC_MODE" = "mirror" ]; then
       SRC_MIRROR_DIR="$MIRROR_DIR/$MODE"
       mkdir -p "$SRC_MIRROR_DIR"
-      echo "[*] Mirroring $MODE (interim mode while source is actively migrating - flat copy, no generations, no deletes): $(date)"
+      echo "[*] Mirroring $MODE (flat copy; deletions follow the source, removed files kept {{ qnap_snapshot_mirror_deleted_keep_days }} days in mirror-deleted): $(date)"
       # Bounded run time (added 2026-10-05). The lock is held for the whole
       # run and a waiting job retries forever, so an unbounded multi-TB mirror
       # starves the nightly generational sources (books, vault, paperless...)
-      # behind it. Stop after N hours; the copy is additive, so the next
-      # run on the next night skips everything already copied. --partial-dir keeps a
-      # half-copied file in a side directory and resumes it, instead of
-      # leaving a stray temp file and starting that file over.
+      # behind it. Stop after N hours; the next run resumes where this one left
+      # off. --partial-dir keeps a half-copied file in a side directory and
+      # resumes it, instead of leaving a stray temp file and starting that file
+      # over.
       MIRROR_DEADLINE=$(( $(date +%s) + {{ qnap_snapshot_mirror_max_hours }} * 3600 ))
       TIMEBOXED=0
-      run_rsync "$SRC_MIRROR_DIR" --partial-dir=.rsync-partial
+      run_rsync "$SRC_MIRROR_DIR" --partial-dir=.rsync-partial \
+        --delete --max-delete={{ qnap_snapshot_mirror_max_delete }} \
+        --backup --backup-dir="$MIRROR_DELETED_DIR/$MODE/$DATE"
       drop_caches
       # Marker the reports backup page reads to judge this mirror (it has no
       # daily generations to date). Touched whether the run completed or was
