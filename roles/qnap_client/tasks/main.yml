@@ -152,8 +152,11 @@
   when: inventory_hostname == 'k8smaster'
   ansible.builtin.cron:
     name: "Sync postgres-backup staging to QNAP"
-    minute: "45"
-    hour: "2"
+    # 04:05, after the 03:30 postgres-backup CronJob (~2 min). It was 02:45,
+    # before the dump, so the QNAP copy was always a day behind and the
+    # backups report showed every database as Degraded (fixed 2026-10-30).
+    minute: "5"
+    hour: "4"
     job: >-
       if mountpoint -q {{ postgres_backup_sync_dest | dirname | dirname }}; then
       rsync -rlpt --delete {{ postgres_backup_staging_dir }}/ {{ postgres_backup_sync_dest }}/
