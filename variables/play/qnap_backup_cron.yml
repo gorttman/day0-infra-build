@@ -96,3 +96,15 @@ qnap_cron_jobs:
   - name: qnap-log-shipper
     schedule: "* * * * *"
     command: "{{ qnap_log_shipper_script_path }} >/dev/null 2>&1"
+
+# Stock QNAP crontab lines to comment out (see write_crontab_entries.yml).
+# vs_refresh: QNAP's own 03:00 job that totals the size of every shared
+# folder. The backup drive counts as a share ([backup], /share/external/
+# DEV3302_1), so it walked every hard-linked snapshot file for hours each
+# night, overlapping the media mirror (2026-11-01: 2h44m of disk wait and
+# still running). Effect of disabling: share-size figures in the QNAP
+# admin pages go stale; nothing we use reads them. To undo, delete the
+# "# DISABLED (qnap-vs-refresh)" prefix from the line in the crontab.
+qnap_cron_disabled:
+  - name: qnap-vs-refresh
+    command: /sbin/vs_refresh

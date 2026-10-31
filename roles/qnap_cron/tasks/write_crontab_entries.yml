@@ -26,3 +26,20 @@
   register: cron_entry_check
   changed_when: "'ADDED' in cron_entry_check.stdout"
   notify: Reload QNAP crontab
+
+# Added 2026-11-01. Comments out stock QNAP crontab lines we do not want,
+# listed in qnap_cron_disabled. Matches the command at the end of an
+# active (not already commented) line, so re-running is a no-op. Only the
+# persistent file is edited; the reload handler loads it into crond.
+# default([]) so plays that do not define the list are unaffected.
+- name: Ensure unwanted stock cron entries are commented out
+  ansible.builtin.raw: >-
+    if grep -qE '^[^#].* {{ item.command }}$' {{ qnap_crontab_file }} 2>/dev/null; then
+    sed -i '\|^[^#].* {{ item.command }}$|s|^|# DISABLED ({{ item.name }}) |' {{ qnap_crontab_file }}; echo DISABLED;
+    else echo ABSENT_OR_DONE; fi
+  loop: "{{ qnap_cron_disabled | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: cron_disable_check
+  changed_when: "'DISABLED' in cron_disable_check.stdout and 'ABSENT' not in cron_disable_check.stdout"
+  notify: Reload QNAP crontab
