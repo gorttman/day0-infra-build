@@ -489,3 +489,14 @@ resource "unifi_user" "gpo_pergola_double" {
   dev_id_override = 4412
   blocked         = false
 }
+
+# Photo-editing Mac (MacBook Pro 14", M5 Pro). Fixed address so the Pi-hole
+# record mac.i3sec.com.au and remote SSH never point at a moving DHCP lease.
+# Added 2026-11-09. MAC is the Wi-Fi address the router sees.
+resource "unifi_user" "photo_mac" {
+  mac        = "4a:5c:e6:56:93:44"
+  name       = "photo-mac"
+  fixed_ip   = "192.168.2.61"
+  network_id = unifi_network.default.id
+  blocked    = false
+}
